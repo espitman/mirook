@@ -36,8 +36,29 @@ struct TranslationInspectorView: View {
                         Text("Open a PDF to choose pages.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Current page: \(documentStore.currentPageNumber)")
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            pageNumberField("From", value: selectedStartPage)
+                            pageNumberField("To", value: selectedEndPage)
+                        }
+                        .disabled(documentStore.isTranslatingTextPage)
+
+                        HStack(spacing: 8) {
+                            Button("Current") {
+                                documentStore.selectCurrentPage()
+                            }
+
+                            Button("All") {
+                                documentStore.selectAllPages()
+                            }
+
+                            Spacer()
+
+                            Text("\(documentStore.selectedPageCount) selected")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(documentStore.isTranslatingTextPage)
                     }
                 }
 
@@ -76,6 +97,21 @@ struct TranslationInspectorView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(documentStore.document == nil || documentStore.isTranslatingTextPage)
 
+                Button {
+                    Task {
+                        await documentStore.translateSelectedPagesAsText()
+                    }
+                } label: {
+                    Label("Translate Selected Text Pages", systemImage: "doc.text")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    documentStore.document == nil ||
+                    documentStore.isTranslatingTextPage ||
+                    documentStore.selectedPageCount == 0
+                )
+
                 textTranslationPreview
 
                 Button {
@@ -94,6 +130,40 @@ struct TranslationInspectorView: View {
             .padding(20)
         }
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var selectedStartPage: Binding<Int> {
+        Binding {
+            documentStore.pageSelection.startPage
+        } set: { newValue in
+            documentStore.setPageSelection(
+                startPage: newValue,
+                endPage: documentStore.pageSelection.endPage
+            )
+        }
+    }
+
+    private var selectedEndPage: Binding<Int> {
+        Binding {
+            documentStore.pageSelection.endPage
+        } set: { newValue in
+            documentStore.setPageSelection(
+                startPage: documentStore.pageSelection.startPage,
+                endPage: newValue
+            )
+        }
+    }
+
+    private func pageNumberField(_ title: String, value: Binding<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            TextField(title, value: value, format: .number)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 76)
+        }
     }
 
     @ViewBuilder
@@ -184,11 +254,20 @@ struct TranslationInspectorView: View {
     @ViewBuilder
     private var textTranslationPreview: some View {
         if documentStore.isTranslatingTextPage {
-            HStack {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Translating text...")
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(documentStore.textTranslationProgressDescription)
+                        .foregroundStyle(.secondary)
+                }
+
+                if documentStore.textTranslationProgressTotal > 1 {
+                    ProgressView(
+                        value: Double(documentStore.textTranslationProgressCurrent),
+                        total: Double(documentStore.textTranslationProgressTotal)
+                    )
+                }
             }
         } else if let translatedTextPage = documentStore.translatedTextPage {
             VStack(alignment: .leading, spacing: 10) {

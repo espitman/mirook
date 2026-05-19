@@ -459,6 +459,7 @@ Tasks:
 - [x] Add save panel.
 - [x] Export final PDF.
 - [x] Add text-first PDF export for readable book-style output.
+- [x] Translate selected page ranges through the text-first pipeline.
 
 Deliverable:
 

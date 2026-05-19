@@ -10,7 +10,11 @@ final class PDFDocumentStore: ObservableObject {
     @Published var currentPageIndex: Int = 0 {
         didSet {
             guard oldValue != currentPageIndex, pageCount > 0 else { return }
-            pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+            let previousPageNumber = oldValue + 1
+            if pageSelection.startPage == previousPageNumber,
+               pageSelection.endPage == previousPageNumber {
+                pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+            }
             renderedPage = nil
             translatedPage = nil
             translatedRenderedPage = nil
@@ -29,6 +33,9 @@ final class PDFDocumentStore: ObservableObject {
     @Published private(set) var translatedTextPage: TranslatedTextPage?
     @Published private(set) var translatedTextPagesByIndex: [Int: TranslatedTextPage] = [:]
     @Published private(set) var isTranslatingTextPage = false
+    @Published private(set) var textTranslationProgressCurrent = 0
+    @Published private(set) var textTranslationProgressTotal = 0
+    @Published private(set) var textTranslationProgressPageNumber: Int?
     @Published private(set) var isExportingPDF = false
     @Published private(set) var isExportingTextPDF = false
     @Published private(set) var lastExportedPDFURL: URL?
@@ -68,6 +75,25 @@ final class PDFDocumentStore: ObservableObject {
         return currentPageIndex + 1
     }
 
+    var selectedPageNumbers: [Int] {
+        guard let range = selectedPageRange else { return [] }
+        return Array(range)
+    }
+
+    var selectedPageCount: Int {
+        selectedPageNumbers.count
+    }
+
+    var textTranslationProgressDescription: String {
+        guard isTranslatingTextPage else { return "" }
+        guard textTranslationProgressTotal > 1 else { return "Translating text..." }
+
+        if let pageNumber = textTranslationProgressPageNumber {
+            return "Translating page \(pageNumber) (\(textTranslationProgressCurrent) of \(textTranslationProgressTotal))"
+        }
+        return "Translating text (\(textTranslationProgressCurrent) of \(textTranslationProgressTotal))"
+    }
+
     var translatedExportPageCount: Int {
         translatedRenderedPagesByIndex.count
     }
@@ -101,7 +127,6 @@ final class PDFDocumentStore: ObservableObject {
     func goToPreviousPage() {
         guard currentPageIndex > 0 else { return }
         currentPageIndex -= 1
-        pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
@@ -111,7 +136,6 @@ final class PDFDocumentStore: ObservableObject {
     func goToNextPage() {
         guard currentPageIndex + 1 < pageCount else { return }
         currentPageIndex += 1
-        pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
@@ -121,11 +145,32 @@ final class PDFDocumentStore: ObservableObject {
     func goToPage(number: Int) {
         guard pageCount > 0 else { return }
         currentPageIndex = min(max(number - 1, 0), pageCount - 1)
-        pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
         translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
+    }
+
+    func setPageSelection(startPage: Int, endPage: Int) {
+        guard pageCount > 0 else {
+            pageSelection = .firstPage
+            return
+        }
+
+        pageSelection = PDFPageSelection(
+            startPage: clampedPageNumber(startPage),
+            endPage: clampedPageNumber(endPage)
+        )
+    }
+
+    func selectCurrentPage() {
+        guard pageCount > 0 else { return }
+        pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+    }
+
+    func selectAllPages() {
+        guard pageCount > 0 else { return }
+        pageSelection = PDFPageSelection(startPage: 1, endPage: pageCount)
     }
 
     func renderCurrentPage() {
@@ -199,60 +244,27 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     func translateCurrentPageAsText() async {
-        guard let document, let page = document.page(at: currentPageIndex) else {
+        guard pageCount > 0 else {
             lastErrorMessage = "Open a PDF before translating a page."
             return
         }
 
-        let sourceText = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sourceText.isEmpty else {
-            lastErrorMessage = "This page does not contain extractable text."
+        await translateTextPagesAsText(
+            pageNumbers: [currentPageNumber],
+            noTextMessage: "This page does not contain extractable text."
+        )
+    }
+
+    func translateSelectedPagesAsText() async {
+        guard pageCount > 0 else {
+            lastErrorMessage = "Open a PDF before translating pages."
             return
         }
 
-        isTranslatingTextPage = true
-        defer { isTranslatingTextPage = false }
-
-        do {
-            let apiKey = try keychainService.read(account: SettingsKey.openAIAPIKeyAccount) ?? ""
-            let model = normalizedSetting(
-                key: SettingsKey.defaultModelName,
-                fallback: SettingsKey.fallbackModelName
-            )
-            let baseURL = normalizedSetting(
-                key: SettingsKey.defaultAIBaseURL,
-                fallback: SettingsKey.fallbackAIBaseURL
-            )
-            let provider = normalizedSetting(
-                key: SettingsKey.defaultAIProvider,
-                fallback: SettingsKey.fallbackAIProvider
-            )
-            let targetLanguage = normalizedSetting(
-                key: SettingsKey.defaultTargetLanguage,
-                fallback: SettingsKey.fallbackTargetLanguage
-            )
-
-            let client = OpenAIClient(
-                apiKey: apiKey,
-                baseURL: baseURL,
-                apiStyle: OpenAIClient.APIStyle(rawValue: provider) ?? .responses
-            )
-            let translatedText = try await client.translateText(
-                sourceText,
-                targetLanguage: targetLanguage,
-                model: model
-            )
-            let page = TranslatedTextPage(
-                pageIndex: currentPageIndex,
-                sourceText: sourceText,
-                translatedText: translatedText
-            )
-            translatedTextPage = page
-            translatedTextPagesByIndex[currentPageIndex] = page
-            lastErrorMessage = nil
-        } catch {
-            lastErrorMessage = error.localizedDescription
-        }
+        await translateTextPagesAsText(
+            pageNumbers: selectedPageNumbers,
+            noTextMessage: "Selected pages do not contain extractable text."
+        )
     }
 
     func renderTranslatedPreview() {
@@ -342,6 +354,101 @@ final class PDFDocumentStore: ObservableObject {
             )
             lastExportedTextPDFURL = url
             lastErrorMessage = nil
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func translateTextPagesAsText(pageNumbers: [Int], noTextMessage: String) async {
+        guard let document else {
+            lastErrorMessage = "Open a PDF before translating pages."
+            return
+        }
+
+        let normalizedPageNumbers = uniquePageNumbers(pageNumbers)
+        guard !normalizedPageNumbers.isEmpty else {
+            lastErrorMessage = "Choose at least one page before translating."
+            return
+        }
+
+        isTranslatingTextPage = true
+        textTranslationProgressCurrent = 0
+        textTranslationProgressTotal = normalizedPageNumbers.count
+        textTranslationProgressPageNumber = nil
+        defer {
+            isTranslatingTextPage = false
+            textTranslationProgressCurrent = 0
+            textTranslationProgressTotal = 0
+            textTranslationProgressPageNumber = nil
+        }
+
+        do {
+            let apiKey = try keychainService.read(account: SettingsKey.openAIAPIKeyAccount) ?? ""
+            let model = normalizedSetting(
+                key: SettingsKey.defaultModelName,
+                fallback: SettingsKey.fallbackModelName
+            )
+            let baseURL = normalizedSetting(
+                key: SettingsKey.defaultAIBaseURL,
+                fallback: SettingsKey.fallbackAIBaseURL
+            )
+            let provider = normalizedSetting(
+                key: SettingsKey.defaultAIProvider,
+                fallback: SettingsKey.fallbackAIProvider
+            )
+            let targetLanguage = normalizedSetting(
+                key: SettingsKey.defaultTargetLanguage,
+                fallback: SettingsKey.fallbackTargetLanguage
+            )
+            let client = OpenAIClient(
+                apiKey: apiKey,
+                baseURL: baseURL,
+                apiStyle: OpenAIClient.APIStyle(rawValue: provider) ?? .responses
+            )
+
+            var skippedPageNumbers: [Int] = []
+
+            for (offset, pageNumber) in normalizedPageNumbers.enumerated() {
+                textTranslationProgressCurrent = offset + 1
+                textTranslationProgressPageNumber = pageNumber
+
+                guard let page = document.page(at: pageNumber - 1) else {
+                    skippedPageNumbers.append(pageNumber)
+                    continue
+                }
+
+                let sourceText = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !sourceText.isEmpty else {
+                    skippedPageNumbers.append(pageNumber)
+                    continue
+                }
+
+                let translatedText = try await client.translateText(
+                    sourceText,
+                    targetLanguage: targetLanguage,
+                    model: model
+                )
+                let translatedTextPage = TranslatedTextPage(
+                    pageIndex: pageNumber - 1,
+                    sourceText: sourceText,
+                    translatedText: translatedText
+                )
+                translatedTextPagesByIndex[pageNumber - 1] = translatedTextPage
+
+                if pageNumber - 1 == currentPageIndex {
+                    self.translatedTextPage = translatedTextPage
+                }
+            }
+
+            translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
+
+            if skippedPageNumbers.count == normalizedPageNumbers.count {
+                lastErrorMessage = noTextMessage
+            } else if !skippedPageNumbers.isEmpty {
+                lastErrorMessage = "Skipped pages without extractable text: \(formattedPageList(skippedPageNumbers))."
+            } else {
+                lastErrorMessage = nil
+            }
         } catch {
             lastErrorMessage = error.localizedDescription
         }
@@ -567,6 +674,34 @@ final class PDFDocumentStore: ObservableObject {
                 )
             ]
         )
+    }
+
+    private var selectedPageRange: ClosedRange<Int>? {
+        guard pageCount > 0 else { return nil }
+
+        let normalized = pageSelection.normalized
+        let lowerBound = clampedPageNumber(normalized.lowerBound)
+        let upperBound = clampedPageNumber(normalized.upperBound)
+        return min(lowerBound, upperBound)...max(lowerBound, upperBound)
+    }
+
+    private func clampedPageNumber(_ pageNumber: Int) -> Int {
+        min(max(pageNumber, 1), max(pageCount, 1))
+    }
+
+    private func uniquePageNumbers(_ pageNumbers: [Int]) -> [Int] {
+        var seenPageNumbers = Set<Int>()
+        return pageNumbers
+            .map(clampedPageNumber)
+            .filter { pageNumber in
+                seenPageNumbers.insert(pageNumber).inserted
+            }
+    }
+
+    private func formattedPageList(_ pageNumbers: [Int]) -> String {
+        let sortedNumbers = pageNumbers.sorted()
+        let visibleNumbers = sortedNumbers.prefix(8).map(String.init).joined(separator: ", ")
+        return sortedNumbers.count > 8 ? "\(visibleNumbers), ..." : visibleNumbers
     }
 
     private func normalizedSetting(key: String, fallback: String) -> String {
