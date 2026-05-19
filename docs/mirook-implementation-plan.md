@@ -352,6 +352,7 @@ Current progress:
 - [x] Basic page navigation and zoom controls are implemented.
 - [x] Page rendering pipeline is implemented for the current page.
 - [x] OpenAI translation pipeline is implemented and builds.
+- [x] Translated page preview rendering is implemented.
 
 ### Phase 1 — Project Setup
 
@@ -434,16 +435,16 @@ Goal: Generate a visual translated page.
 
 Tasks:
 
-- [ ] Use original page image as background.
-- [ ] Overlay translated Persian text blocks.
-- [ ] Implement right-to-left text drawing.
-- [ ] Fit text into bounding boxes.
-- [ ] Hide original English text areas.
-- [ ] Generate a translated page preview.
+- [x] Use original page image as background.
+- [x] Overlay translated Persian text blocks.
+- [x] Implement right-to-left text drawing.
+- [x] Fit text into bounding boxes.
+- [x] Hide original English text areas.
+- [x] Generate a translated page preview.
 
 Deliverable:
 
-- [ ] User can see a translated page that resembles the original page.
+- [x] User can see a translated page that resembles the original page.
 
 ---
 

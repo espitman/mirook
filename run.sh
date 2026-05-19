@@ -16,4 +16,9 @@ app_path="$(xcodebuild \
   -showBuildSettings \
   | awk -F' = ' '/TARGET_BUILD_DIR/ { build_dir=$2 } /FULL_PRODUCT_NAME/ { product=$2 } END { print build_dir "/" product }')"
 
-open "$app_path"
+if pgrep -x Mirook >/dev/null; then
+  osascript -e 'tell application "Mirook" to quit' >/dev/null 2>&1 || true
+  sleep 0.5
+fi
+
+open -n "$app_path"

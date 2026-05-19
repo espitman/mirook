@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1C09C63E874FDD91342A9187 /* TranslatedPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */; };
 		2B11B001D31BA028DAF79CF9 /* PDFDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */; };
+		33F9F24079CAFD9BC49F091C /* TranslatedRenderedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5EB3DB14983897F041D9177 /* TranslatedRenderedPage.swift */; };
 		3673CE34AAA9E5AB9C753188 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A318F86014A8807A2C59C5 /* ReaderView.swift */; };
 		39A08E67C16B383C5A1DB404 /* RenderedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3073E483804981A9310B8063 /* RenderedPage.swift */; };
 		4805301EBE4A4F1A457ED2CB /* TranslationInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */; };
@@ -15,6 +17,7 @@
 		B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */; };
 		B41271B3DC00D229636CF296 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970722C082B20727DE683EE3 /* KeychainService.swift */; };
 		B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB83DA844EDBDECF0D03691 /* MirookApp.swift */; };
+		B842A55DA170438F4B04DF4B /* PersianTextLayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2E65E0C8D26472EB824216 /* PersianTextLayoutEngine.swift */; };
 		BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */; };
 		BF99569C15AA2A90F1054EB4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 726EC6286C625CA612D58DDF /* Assets.xcassets */; };
 		C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */; };
@@ -35,6 +38,7 @@
 		659F0594572BE283DF58BBA9 /* TranslationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationModels.swift; sourceTree = "<group>"; };
 		726EC6286C625CA612D58DDF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		765E5EF13D1F45C5EB718690 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedPageRenderer.swift; sourceTree = "<group>"; };
 		86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyReaderState.swift; sourceTree = "<group>"; };
 		94A91FA09881EE7790A589CD /* PDFPageSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageSelection.swift; sourceTree = "<group>"; };
 		970722C082B20727DE683EE3 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -43,6 +47,8 @@
 		BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFDocumentStore.swift; sourceTree = "<group>"; };
 		D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFKitView.swift; sourceTree = "<group>"; };
 		E4A318F86014A8807A2C59C5 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		F5EB3DB14983897F041D9177 /* TranslatedRenderedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedRenderedPage.swift; sourceTree = "<group>"; };
+		FF2E65E0C8D26472EB824216 /* PersianTextLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersianTextLayoutEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -52,6 +58,8 @@
 				970722C082B20727DE683EE3 /* KeychainService.swift */,
 				069894F6C093E43C23F007A8 /* OpenAIClient.swift */,
 				B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */,
+				FF2E65E0C8D26472EB824216 /* PersianTextLayoutEngine.swift */,
+				83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -76,6 +84,7 @@
 				BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */,
 				94A91FA09881EE7790A589CD /* PDFPageSelection.swift */,
 				3073E483804981A9310B8063 /* RenderedPage.swift */,
+				F5EB3DB14983897F041D9177 /* TranslatedRenderedPage.swift */,
 				659F0594572BE283DF58BBA9 /* TranslationModels.swift */,
 			);
 			path = Models;
@@ -185,10 +194,13 @@
 				CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */,
 				D488476EB571EFE254C53DF7 /* PDFPageRenderer.swift in Sources */,
 				C6F41B55A2F139B88BA436B7 /* PDFPageSelection.swift in Sources */,
+				B842A55DA170438F4B04DF4B /* PersianTextLayoutEngine.swift in Sources */,
 				3673CE34AAA9E5AB9C753188 /* ReaderView.swift in Sources */,
 				39A08E67C16B383C5A1DB404 /* RenderedPage.swift in Sources */,
 				C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */,
 				BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */,
+				1C09C63E874FDD91342A9187 /* TranslatedPageRenderer.swift in Sources */,
+				33F9F24079CAFD9BC49F091C /* TranslatedRenderedPage.swift in Sources */,
 				4805301EBE4A4F1A457ED2CB /* TranslationInspectorView.swift in Sources */,
 				A723A0183D1C6130F3EE737A /* TranslationModels.swift in Sources */,
 			);

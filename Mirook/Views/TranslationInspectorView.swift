@@ -64,6 +64,17 @@ struct TranslationInspectorView: View {
                 .disabled(documentStore.document == nil || documentStore.isTranslatingPage)
 
                 translationPreview
+
+                Button {
+                    documentStore.renderTranslatedPreview()
+                } label: {
+                    Label(documentStore.translatedPage == nil ? "Build Mock Layout Preview" : "Build Translated Preview", systemImage: "doc.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(documentStore.document == nil || documentStore.isRenderingTranslatedPage)
+
+                translatedPagePreview
             }
             .padding(20)
         }
@@ -151,6 +162,50 @@ struct TranslationInspectorView: View {
                     .background(Color(nsColor: .textBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var translatedPagePreview: some View {
+        if documentStore.isRenderingTranslatedPage {
+            HStack {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Building translated preview...")
+                    .foregroundStyle(.secondary)
+            }
+        } else if let translatedRenderedPage = documentStore.translatedRenderedPage {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Translated Page Preview")
+                    .font(.headline)
+
+                if documentStore.translatedPage?.blocks.first?.id.hasPrefix("mock_") == true {
+                    Text("Mock preview uses local PDF text bounds. Real translation requires OpenAI output.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let image = translatedRenderedPage.image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.separator, lineWidth: 1)
+                        }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Page \(translatedRenderedPage.pageNumber)")
+                    Text("\(translatedRenderedPage.blockCount) translated blocks")
+                    Text("\(Int(translatedRenderedPage.width)) x \(Int(translatedRenderedPage.height)) px")
+                    Text(translatedRenderedPage.imageData.count.formatted(.byteCount(style: .file)))
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
     }
