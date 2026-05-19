@@ -75,6 +75,8 @@ struct TranslationInspectorView: View {
                 .disabled(documentStore.document == nil || documentStore.isRenderingTranslatedPage)
 
                 translatedPagePreview
+
+                exportControls
             }
             .padding(20)
         }
@@ -203,6 +205,36 @@ struct TranslationInspectorView: View {
                     Text("\(translatedRenderedPage.blockCount) translated blocks")
                     Text("\(Int(translatedRenderedPage.width)) x \(Int(translatedRenderedPage.height)) px")
                     Text(translatedRenderedPage.imageData.count.formatted(.byteCount(style: .file)))
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var exportControls: some View {
+        if documentStore.document != nil {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Export")
+                    .font(.headline)
+
+                Button {
+                    documentStore.exportTranslatedPDF()
+                } label: {
+                    Label("Export Translated PDF", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(documentStore.translatedExportPageCount == 0 || documentStore.isExportingPDF)
+
+                HStack(spacing: 6) {
+                    Text("\(documentStore.translatedExportPageCount) pages ready")
+                    if let url = documentStore.lastExportedPDFURL {
+                        Text("Saved: \(url.lastPathComponent)")
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

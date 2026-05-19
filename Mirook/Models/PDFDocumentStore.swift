@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import PDFKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class PDFDocumentStore: ObservableObject {
@@ -22,10 +24,14 @@ final class PDFDocumentStore: ObservableObject {
     @Published private(set) var isTranslatingPage = false
     @Published private(set) var translatedRenderedPage: TranslatedRenderedPage?
     @Published private(set) var isRenderingTranslatedPage = false
+    @Published private(set) var translatedRenderedPagesByIndex: [Int: TranslatedRenderedPage] = [:]
+    @Published private(set) var isExportingPDF = false
+    @Published private(set) var lastExportedPDFURL: URL?
     @Published var lastErrorMessage: String?
 
     private let pageRenderer = PDFPageRenderer(scale: 2.0)
     private let translatedPageRenderer = TranslatedPageRenderer()
+    private let pdfExportService = PDFExportService()
     private let keychainService = KeychainService()
 
     private enum SettingsKey {
@@ -51,6 +57,10 @@ final class PDFDocumentStore: ObservableObject {
         return currentPageIndex + 1
     }
 
+    var translatedExportPageCount: Int {
+        translatedRenderedPagesByIndex.count
+    }
+
     func openPDF(from url: URL) {
         guard let loadedDocument = PDFDocument(url: url) else {
             lastErrorMessage = "The selected file could not be opened as a PDF."
@@ -65,6 +75,8 @@ final class PDFDocumentStore: ObservableObject {
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
+        translatedRenderedPagesByIndex = [:]
+        lastExportedPDFURL = nil
         lastErrorMessage = nil
     }
 
@@ -107,6 +119,7 @@ final class PDFDocumentStore: ObservableObject {
         do {
             renderedPage = try pageRenderer.render(document: document, pageIndex: currentPageIndex)
             translatedRenderedPage = nil
+            translatedRenderedPagesByIndex[currentPageIndex] = nil
         } catch {
             lastErrorMessage = error.localizedDescription
         }
@@ -171,10 +184,43 @@ final class PDFDocumentStore: ObservableObject {
                 makeMockTranslatedPage(for: renderedPage)
             }
             translatedPage = page
-            translatedRenderedPage = try translatedPageRenderer.render(
+            let renderedTranslation = try translatedPageRenderer.render(
                 renderedPage: renderedPage,
                 translatedPage: page
             )
+            translatedRenderedPage = renderedTranslation
+            translatedRenderedPagesByIndex[renderedTranslation.pageIndex] = renderedTranslation
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func exportTranslatedPDF() {
+        guard !translatedRenderedPagesByIndex.isEmpty else {
+            lastErrorMessage = PDFExportServiceError.noPages.localizedDescription
+            return
+        }
+
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.pdf]
+        savePanel.canCreateDirectories = true
+        savePanel.isExtensionHidden = false
+        savePanel.nameFieldStringValue = "\(displayName)-translated.pdf"
+
+        guard savePanel.runModal() == .OK, let url = savePanel.url else {
+            return
+        }
+
+        isExportingPDF = true
+        defer { isExportingPDF = false }
+
+        do {
+            try pdfExportService.export(
+                pages: Array(translatedRenderedPagesByIndex.values),
+                to: url
+            )
+            lastExportedPDFURL = url
+            lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription
         }

@@ -454,14 +454,14 @@ Goal: Export translated pages as a PDF.
 
 Tasks:
 
-- [ ] Convert translated page renderings into PDF pages.
-- [ ] Merge multiple pages.
-- [ ] Add save panel.
-- [ ] Export final PDF.
+- [x] Convert translated page renderings into PDF pages.
+- [x] Merge multiple pages.
+- [x] Add save panel.
+- [x] Export final PDF.
 
 Deliverable:
 
-- [ ] User can export selected translated pages as one continuous PDF.
+- [x] User can export selected translated pages as one continuous PDF.
 
 ---
 

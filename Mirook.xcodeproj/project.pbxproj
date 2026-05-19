@@ -21,6 +21,7 @@
 		BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */; };
 		BF99569C15AA2A90F1054EB4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 726EC6286C625CA612D58DDF /* Assets.xcassets */; };
 		C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */; };
+		C45B51481AF12101DC6A1FF1 /* PDFExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCB25977EE7E68E50B569478 /* PDFExportService.swift */; };
 		C6F41B55A2F139B88BA436B7 /* PDFPageSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A91FA09881EE7790A589CD /* PDFPageSelection.swift */; };
 		CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */; };
 		CD36549DBC51132042765A45 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 069894F6C093E43C23F007A8 /* OpenAIClient.swift */; };
@@ -45,6 +46,7 @@
 		ACB83DA844EDBDECF0D03691 /* MirookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MirookApp.swift; sourceTree = "<group>"; };
 		B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageRenderer.swift; sourceTree = "<group>"; };
 		BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFDocumentStore.swift; sourceTree = "<group>"; };
+		BCB25977EE7E68E50B569478 /* PDFExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExportService.swift; sourceTree = "<group>"; };
 		D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFKitView.swift; sourceTree = "<group>"; };
 		E4A318F86014A8807A2C59C5 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		F5EB3DB14983897F041D9177 /* TranslatedRenderedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedRenderedPage.swift; sourceTree = "<group>"; };
@@ -57,6 +59,7 @@
 			children = (
 				970722C082B20727DE683EE3 /* KeychainService.swift */,
 				069894F6C093E43C23F007A8 /* OpenAIClient.swift */,
+				BCB25977EE7E68E50B569478 /* PDFExportService.swift */,
 				B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */,
 				FF2E65E0C8D26472EB824216 /* PersianTextLayoutEngine.swift */,
 				83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */,
@@ -191,6 +194,7 @@
 				B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */,
 				CD36549DBC51132042765A45 /* OpenAIClient.swift in Sources */,
 				2B11B001D31BA028DAF79CF9 /* PDFDocumentStore.swift in Sources */,
+				C45B51481AF12101DC6A1FF1 /* PDFExportService.swift in Sources */,
 				CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */,
 				D488476EB571EFE254C53DF7 /* PDFPageRenderer.swift in Sources */,
 				C6F41B55A2F139B88BA436B7 /* PDFPageSelection.swift in Sources */,
