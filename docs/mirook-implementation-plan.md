@@ -450,7 +450,7 @@ Deliverable:
 
 ### Phase 6 — PDF Export
 
-Goal: Export translated pages as a PDF.
+Goal: Export translated pages as a PDF, with both visual overlay export and book-style text export.
 
 Tasks:
 
@@ -458,10 +458,12 @@ Tasks:
 - [x] Merge multiple pages.
 - [x] Add save panel.
 - [x] Export final PDF.
+- [x] Add text-first PDF export for readable book-style output.
 
 Deliverable:
 
 - [x] User can export selected translated pages as one continuous PDF.
+- [x] User can export translated extractable text as a reflowed Persian PDF without rasterizing the original page.
 
 ---
 

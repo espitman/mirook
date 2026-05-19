@@ -66,6 +66,19 @@ struct TranslationInspectorView: View {
                 translationPreview
 
                 Button {
+                    Task {
+                        await documentStore.translateCurrentPageAsText()
+                    }
+                } label: {
+                    Label("Translate Current Page Text", systemImage: "text.alignright")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(documentStore.document == nil || documentStore.isTranslatingTextPage)
+
+                textTranslationPreview
+
+                Button {
                     documentStore.renderTranslatedPreview()
                 } label: {
                     Label(documentStore.translatedPage == nil ? "Build Mock Layout Preview" : "Build Translated Preview", systemImage: "doc.viewfinder")
@@ -169,6 +182,36 @@ struct TranslationInspectorView: View {
     }
 
     @ViewBuilder
+    private var textTranslationPreview: some View {
+        if documentStore.isTranslatingTextPage {
+            HStack {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Translating text...")
+                    .foregroundStyle(.secondary)
+            }
+        } else if let translatedTextPage = documentStore.translatedTextPage {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Translated Text")
+                    .font(.headline)
+
+                Text(translatedTextPage.translatedText)
+                    .font(.body)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(10)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(10)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                Text("Page \(translatedTextPage.pageNumber)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var translatedPagePreview: some View {
         if documentStore.isRenderingTranslatedPage {
             HStack {
@@ -230,9 +273,27 @@ struct TranslationInspectorView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(documentStore.translatedExportPageCount == 0 || documentStore.isExportingPDF)
 
+                Button {
+                    documentStore.exportTextTranslatedPDF()
+                } label: {
+                    Label("Export Text PDF", systemImage: "doc.plaintext")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(documentStore.translatedTextExportPageCount == 0 || documentStore.isExportingTextPDF)
+
                 HStack(spacing: 6) {
                     Text("\(documentStore.translatedExportPageCount) pages ready")
                     if let url = documentStore.lastExportedPDFURL {
+                        Text("Saved: \(url.lastPathComponent)")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                HStack(spacing: 6) {
+                    Text("\(documentStore.translatedTextExportPageCount) text pages ready")
+                    if let url = documentStore.lastExportedTextPDFURL {
                         Text("Saved: \(url.lastPathComponent)")
                     }
                 }

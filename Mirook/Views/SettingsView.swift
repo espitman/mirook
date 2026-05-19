@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @AppStorage("defaultAIProvider") private var defaultAIProvider = "responses"
+    @AppStorage("defaultAIBaseURL") private var defaultAIBaseURL = "https://api.openai.com/v1"
     @AppStorage("defaultTargetLanguage") private var defaultTargetLanguage = "Persian"
     @AppStorage("defaultModelName") private var defaultModelName = "gpt-5.2"
     @State private var apiKey = ""
@@ -12,11 +14,19 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Form {
-                SecureField("OpenAI API key", text: $apiKey)
+                Picker("AI provider", selection: $defaultAIProvider) {
+                    Text("OpenAI Responses").tag("responses")
+                    Text("OpenAI-compatible Chat").tag("chatCompletions")
+                }
+
+                SecureField("AI API key", text: $apiKey)
                     .textContentType(.password)
 
+                TextField("AI base URL", text: $defaultAIBaseURL)
+                    .textContentType(.URL)
+
                 TextField("Default target language", text: $defaultTargetLanguage)
-                TextField("OpenAI model", text: $defaultModelName)
+                TextField("AI model", text: $defaultModelName)
                     .textContentType(.none)
             }
 
@@ -38,9 +48,17 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Liara setup")
+                    .font(.caption.weight(.semibold))
+                Text("For Liara, choose OpenAI-compatible Chat, paste Liara's OpenAI-compatible base URL, and use a vision-capable model from Liara.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(24)
-        .frame(width: 420)
+        .frame(width: 480)
         .task {
             loadAPIKey()
         }

@@ -14,6 +14,7 @@ final class PDFDocumentStore: ObservableObject {
             renderedPage = nil
             translatedPage = nil
             translatedRenderedPage = nil
+            translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
         }
     }
     @Published var zoomScale: CGFloat = 1.0
@@ -25,19 +26,29 @@ final class PDFDocumentStore: ObservableObject {
     @Published private(set) var translatedRenderedPage: TranslatedRenderedPage?
     @Published private(set) var isRenderingTranslatedPage = false
     @Published private(set) var translatedRenderedPagesByIndex: [Int: TranslatedRenderedPage] = [:]
+    @Published private(set) var translatedTextPage: TranslatedTextPage?
+    @Published private(set) var translatedTextPagesByIndex: [Int: TranslatedTextPage] = [:]
+    @Published private(set) var isTranslatingTextPage = false
     @Published private(set) var isExportingPDF = false
+    @Published private(set) var isExportingTextPDF = false
     @Published private(set) var lastExportedPDFURL: URL?
+    @Published private(set) var lastExportedTextPDFURL: URL?
     @Published var lastErrorMessage: String?
 
     private let pageRenderer = PDFPageRenderer(scale: 2.0)
     private let translatedPageRenderer = TranslatedPageRenderer()
     private let pdfExportService = PDFExportService()
+    private let textPDFExportService = TextPDFExportService()
     private let keychainService = KeychainService()
 
     private enum SettingsKey {
         static let openAIAPIKeyAccount = "openai-api-key"
+        static let defaultAIProvider = "defaultAIProvider"
+        static let defaultAIBaseURL = "defaultAIBaseURL"
         static let defaultTargetLanguage = "defaultTargetLanguage"
         static let defaultModelName = "defaultModelName"
+        static let fallbackAIProvider = "responses"
+        static let fallbackAIBaseURL = "https://api.openai.com/v1"
         static let fallbackTargetLanguage = "Persian"
         static let fallbackModelName = "gpt-5.2"
     }
@@ -61,6 +72,10 @@ final class PDFDocumentStore: ObservableObject {
         translatedRenderedPagesByIndex.count
     }
 
+    var translatedTextExportPageCount: Int {
+        translatedTextPagesByIndex.count
+    }
+
     func openPDF(from url: URL) {
         guard let loadedDocument = PDFDocument(url: url) else {
             lastErrorMessage = "The selected file could not be opened as a PDF."
@@ -76,7 +91,10 @@ final class PDFDocumentStore: ObservableObject {
         translatedPage = nil
         translatedRenderedPage = nil
         translatedRenderedPagesByIndex = [:]
+        translatedTextPage = nil
+        translatedTextPagesByIndex = [:]
         lastExportedPDFURL = nil
+        lastExportedTextPDFURL = nil
         lastErrorMessage = nil
     }
 
@@ -87,6 +105,7 @@ final class PDFDocumentStore: ObservableObject {
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
+        translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
     }
 
     func goToNextPage() {
@@ -96,6 +115,7 @@ final class PDFDocumentStore: ObservableObject {
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
+        translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
     }
 
     func goToPage(number: Int) {
@@ -105,6 +125,7 @@ final class PDFDocumentStore: ObservableObject {
         renderedPage = nil
         translatedPage = nil
         translatedRenderedPage = nil
+        translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
     }
 
     func renderCurrentPage() {
@@ -148,18 +169,87 @@ final class PDFDocumentStore: ObservableObject {
                 key: SettingsKey.defaultModelName,
                 fallback: SettingsKey.fallbackModelName
             )
+            let baseURL = normalizedSetting(
+                key: SettingsKey.defaultAIBaseURL,
+                fallback: SettingsKey.fallbackAIBaseURL
+            )
+            let provider = normalizedSetting(
+                key: SettingsKey.defaultAIProvider,
+                fallback: SettingsKey.fallbackAIProvider
+            )
             let targetLanguage = normalizedSetting(
                 key: SettingsKey.defaultTargetLanguage,
                 fallback: SettingsKey.fallbackTargetLanguage
             )
 
-            let client = OpenAIClient(apiKey: apiKey)
+            let client = OpenAIClient(
+                apiKey: apiKey,
+                baseURL: baseURL,
+                apiStyle: OpenAIClient.APIStyle(rawValue: provider) ?? .responses
+            )
             translatedPage = try await client.translatePage(
                 renderedPage: renderedPage,
                 targetLanguage: targetLanguage,
                 model: model
             )
             renderTranslatedPreview()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func translateCurrentPageAsText() async {
+        guard let document, let page = document.page(at: currentPageIndex) else {
+            lastErrorMessage = "Open a PDF before translating a page."
+            return
+        }
+
+        let sourceText = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sourceText.isEmpty else {
+            lastErrorMessage = "This page does not contain extractable text."
+            return
+        }
+
+        isTranslatingTextPage = true
+        defer { isTranslatingTextPage = false }
+
+        do {
+            let apiKey = try keychainService.read(account: SettingsKey.openAIAPIKeyAccount) ?? ""
+            let model = normalizedSetting(
+                key: SettingsKey.defaultModelName,
+                fallback: SettingsKey.fallbackModelName
+            )
+            let baseURL = normalizedSetting(
+                key: SettingsKey.defaultAIBaseURL,
+                fallback: SettingsKey.fallbackAIBaseURL
+            )
+            let provider = normalizedSetting(
+                key: SettingsKey.defaultAIProvider,
+                fallback: SettingsKey.fallbackAIProvider
+            )
+            let targetLanguage = normalizedSetting(
+                key: SettingsKey.defaultTargetLanguage,
+                fallback: SettingsKey.fallbackTargetLanguage
+            )
+
+            let client = OpenAIClient(
+                apiKey: apiKey,
+                baseURL: baseURL,
+                apiStyle: OpenAIClient.APIStyle(rawValue: provider) ?? .responses
+            )
+            let translatedText = try await client.translateText(
+                sourceText,
+                targetLanguage: targetLanguage,
+                model: model
+            )
+            let page = TranslatedTextPage(
+                pageIndex: currentPageIndex,
+                sourceText: sourceText,
+                translatedText: translatedText
+            )
+            translatedTextPage = page
+            translatedTextPagesByIndex[currentPageIndex] = page
+            lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription
         }
@@ -220,6 +310,37 @@ final class PDFDocumentStore: ObservableObject {
                 to: url
             )
             lastExportedPDFURL = url
+            lastErrorMessage = nil
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func exportTextTranslatedPDF() {
+        guard !translatedTextPagesByIndex.isEmpty else {
+            lastErrorMessage = TextPDFExportServiceError.noPages.localizedDescription
+            return
+        }
+
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.pdf]
+        savePanel.canCreateDirectories = true
+        savePanel.isExtensionHidden = false
+        savePanel.nameFieldStringValue = "\(displayName)-text-translated.pdf"
+
+        guard savePanel.runModal() == .OK, let url = savePanel.url else {
+            return
+        }
+
+        isExportingTextPDF = true
+        defer { isExportingTextPDF = false }
+
+        do {
+            try textPDFExportService.export(
+                pages: Array(translatedTextPagesByIndex.values),
+                to: url
+            )
+            lastExportedTextPDFURL = url
             lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription
