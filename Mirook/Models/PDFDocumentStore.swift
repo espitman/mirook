@@ -5,10 +5,20 @@ import PDFKit
 final class PDFDocumentStore: ObservableObject {
     @Published private(set) var document: PDFDocument?
     @Published private(set) var documentURL: URL?
-    @Published var currentPageIndex: Int = 0
+    @Published var currentPageIndex: Int = 0 {
+        didSet {
+            guard oldValue != currentPageIndex, pageCount > 0 else { return }
+            pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+            renderedPage = nil
+        }
+    }
     @Published var zoomScale: CGFloat = 1.0
     @Published var pageSelection: PDFPageSelection = .firstPage
+    @Published private(set) var renderedPage: RenderedPage?
+    @Published private(set) var isRenderingPage = false
     @Published var lastErrorMessage: String?
+
+    private let pageRenderer = PDFPageRenderer(scale: 2.0)
 
     var pageCount: Int {
         document?.pageCount ?? 0
@@ -34,6 +44,7 @@ final class PDFDocumentStore: ObservableObject {
         currentPageIndex = 0
         zoomScale = 1.0
         pageSelection = .firstPage
+        renderedPage = nil
         lastErrorMessage = nil
     }
 
@@ -41,18 +52,37 @@ final class PDFDocumentStore: ObservableObject {
         guard currentPageIndex > 0 else { return }
         currentPageIndex -= 1
         pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+        renderedPage = nil
     }
 
     func goToNextPage() {
         guard currentPageIndex + 1 < pageCount else { return }
         currentPageIndex += 1
         pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+        renderedPage = nil
     }
 
     func goToPage(number: Int) {
         guard pageCount > 0 else { return }
         currentPageIndex = min(max(number - 1, 0), pageCount - 1)
         pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
+        renderedPage = nil
+    }
+
+    func renderCurrentPage() {
+        guard let document else {
+            lastErrorMessage = "Open a PDF before rendering a page."
+            return
+        }
+
+        isRenderingPage = true
+        defer { isRenderingPage = false }
+
+        do {
+            renderedPage = try pageRenderer.render(document: document, pageIndex: currentPageIndex)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
     }
 
     func zoomIn() {

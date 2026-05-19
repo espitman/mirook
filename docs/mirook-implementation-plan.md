@@ -350,7 +350,7 @@ Current progress:
 - [x] macOS SwiftUI app builds successfully.
 - [x] PDF opening and native PDF viewing are implemented.
 - [x] Basic page navigation and zoom controls are implemented.
-- [ ] Page rendering pipeline has not started yet.
+- [x] Page rendering pipeline is implemented for the current page.
 - [ ] OpenAI translation pipeline has not started yet.
 
 ### Phase 1 — Project Setup
@@ -395,14 +395,14 @@ Goal: Convert selected PDF pages to images.
 
 Tasks:
 
-- [ ] Implement `PDFPageRenderer`.
-- [ ] Render current page to PNG.
-- [ ] Store page dimensions.
-- [ ] Preview rendered page for debugging.
+- [x] Implement `PDFPageRenderer`.
+- [x] Render current page to PNG.
+- [x] Store page dimensions.
+- [x] Preview rendered page for debugging.
 
 Deliverable:
 
-- [ ] App can render any selected PDF page as an image.
+- [x] App can render any selected PDF page as an image.
 
 ---
 
