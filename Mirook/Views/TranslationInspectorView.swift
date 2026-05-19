@@ -53,12 +53,17 @@ struct TranslationInspectorView: View {
                 renderPreview
 
                 Button {
+                    Task {
+                        await documentStore.translateCurrentPage()
+                    }
                 } label: {
                     Label("Translate Current Page", systemImage: "wand.and.stars")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(documentStore.document == nil)
+                .disabled(documentStore.document == nil || documentStore.isTranslatingPage)
+
+                translationPreview
             }
             .padding(20)
         }
@@ -98,6 +103,54 @@ struct TranslationInspectorView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var translationPreview: some View {
+        if documentStore.isTranslatingPage {
+            HStack {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Translating page...")
+                    .foregroundStyle(.secondary)
+            }
+        } else if let translatedPage = documentStore.translatedPage {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Translated Blocks")
+                    .font(.headline)
+
+                Text("\(translatedPage.blocks.count) blocks detected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(translatedPage.blocks.prefix(8)) { block in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text(block.role.rawValue)
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            if let confidence = block.confidence {
+                                Text(confidence.formatted(.percent.precision(.fractionLength(0))))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Text(block.sourceText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+
+                        Text(block.translatedText)
+                            .font(.body)
+                            .lineLimit(3)
+                    }
+                    .padding(10)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
             }
         }
     }

@@ -10,15 +10,27 @@ final class PDFDocumentStore: ObservableObject {
             guard oldValue != currentPageIndex, pageCount > 0 else { return }
             pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
             renderedPage = nil
+            translatedPage = nil
         }
     }
     @Published var zoomScale: CGFloat = 1.0
     @Published var pageSelection: PDFPageSelection = .firstPage
     @Published private(set) var renderedPage: RenderedPage?
     @Published private(set) var isRenderingPage = false
+    @Published private(set) var translatedPage: TranslatedPage?
+    @Published private(set) var isTranslatingPage = false
     @Published var lastErrorMessage: String?
 
     private let pageRenderer = PDFPageRenderer(scale: 2.0)
+    private let keychainService = KeychainService()
+
+    private enum SettingsKey {
+        static let openAIAPIKeyAccount = "openai-api-key"
+        static let defaultTargetLanguage = "defaultTargetLanguage"
+        static let defaultModelName = "defaultModelName"
+        static let fallbackTargetLanguage = "Persian"
+        static let fallbackModelName = "gpt-5.2"
+    }
 
     var pageCount: Int {
         document?.pageCount ?? 0
@@ -45,6 +57,7 @@ final class PDFDocumentStore: ObservableObject {
         zoomScale = 1.0
         pageSelection = .firstPage
         renderedPage = nil
+        translatedPage = nil
         lastErrorMessage = nil
     }
 
@@ -53,6 +66,7 @@ final class PDFDocumentStore: ObservableObject {
         currentPageIndex -= 1
         pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
         renderedPage = nil
+        translatedPage = nil
     }
 
     func goToNextPage() {
@@ -60,6 +74,7 @@ final class PDFDocumentStore: ObservableObject {
         currentPageIndex += 1
         pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
         renderedPage = nil
+        translatedPage = nil
     }
 
     func goToPage(number: Int) {
@@ -67,6 +82,7 @@ final class PDFDocumentStore: ObservableObject {
         currentPageIndex = min(max(number - 1, 0), pageCount - 1)
         pageSelection = PDFPageSelection(startPage: currentPageNumber, endPage: currentPageNumber)
         renderedPage = nil
+        translatedPage = nil
     }
 
     func renderCurrentPage() {
@@ -83,6 +99,51 @@ final class PDFDocumentStore: ObservableObject {
         } catch {
             lastErrorMessage = error.localizedDescription
         }
+    }
+
+    func translateCurrentPage() async {
+        guard document != nil else {
+            lastErrorMessage = "Open a PDF before translating a page."
+            return
+        }
+
+        isTranslatingPage = true
+        defer { isTranslatingPage = false }
+
+        do {
+            if renderedPage == nil {
+                renderCurrentPage()
+            }
+
+            guard let renderedPage else {
+                throw PDFPageRendererError.missingPage
+            }
+
+            let apiKey = try keychainService.read(account: SettingsKey.openAIAPIKeyAccount) ?? ""
+            let model = normalizedSetting(
+                key: SettingsKey.defaultModelName,
+                fallback: SettingsKey.fallbackModelName
+            )
+            let targetLanguage = normalizedSetting(
+                key: SettingsKey.defaultTargetLanguage,
+                fallback: SettingsKey.fallbackTargetLanguage
+            )
+
+            let client = OpenAIClient(apiKey: apiKey)
+            translatedPage = try await client.translatePage(
+                renderedPage: renderedPage,
+                targetLanguage: targetLanguage,
+                model: model
+            )
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func normalizedSetting(key: String, fallback: String) -> String {
+        let value = UserDefaults.standard.string(forKey: key) ?? ""
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
     }
 
     func zoomIn() {

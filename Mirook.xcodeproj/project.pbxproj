@@ -11,27 +11,33 @@
 		3673CE34AAA9E5AB9C753188 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A318F86014A8807A2C59C5 /* ReaderView.swift */; };
 		39A08E67C16B383C5A1DB404 /* RenderedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3073E483804981A9310B8063 /* RenderedPage.swift */; };
 		4805301EBE4A4F1A457ED2CB /* TranslationInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */; };
+		A723A0183D1C6130F3EE737A /* TranslationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659F0594572BE283DF58BBA9 /* TranslationModels.swift */; };
 		B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */; };
+		B41271B3DC00D229636CF296 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970722C082B20727DE683EE3 /* KeychainService.swift */; };
 		B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB83DA844EDBDECF0D03691 /* MirookApp.swift */; };
 		BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */; };
 		BF99569C15AA2A90F1054EB4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 726EC6286C625CA612D58DDF /* Assets.xcassets */; };
 		C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */; };
 		C6F41B55A2F139B88BA436B7 /* PDFPageSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A91FA09881EE7790A589CD /* PDFPageSelection.swift */; };
 		CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */; };
+		CD36549DBC51132042765A45 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 069894F6C093E43C23F007A8 /* OpenAIClient.swift */; };
 		D488476EB571EFE254C53DF7 /* PDFPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */; };
 		D768F965987410281BDB816B /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 765E5EF13D1F45C5EB718690 /* MainWindowView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationInspectorView.swift; sourceTree = "<group>"; };
+		069894F6C093E43C23F007A8 /* OpenAIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIClient.swift; sourceTree = "<group>"; };
 		20821DB05F9C09894FB4B4D5 /* Mirook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mirook.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3073E483804981A9310B8063 /* RenderedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderedPage.swift; sourceTree = "<group>"; };
 		314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		659F0594572BE283DF58BBA9 /* TranslationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationModels.swift; sourceTree = "<group>"; };
 		726EC6286C625CA612D58DDF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		765E5EF13D1F45C5EB718690 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyReaderState.swift; sourceTree = "<group>"; };
 		94A91FA09881EE7790A589CD /* PDFPageSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageSelection.swift; sourceTree = "<group>"; };
+		970722C082B20727DE683EE3 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		ACB83DA844EDBDECF0D03691 /* MirookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MirookApp.swift; sourceTree = "<group>"; };
 		B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageRenderer.swift; sourceTree = "<group>"; };
 		BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFDocumentStore.swift; sourceTree = "<group>"; };
@@ -43,6 +49,8 @@
 		2BD8DCA7D7B3E6A921657FD0 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				970722C082B20727DE683EE3 /* KeychainService.swift */,
+				069894F6C093E43C23F007A8 /* OpenAIClient.swift */,
 				B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */,
 			);
 			path = Services;
@@ -68,6 +76,7 @@
 				BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */,
 				94A91FA09881EE7790A589CD /* PDFPageSelection.swift */,
 				3073E483804981A9310B8063 /* RenderedPage.swift */,
+				659F0594572BE283DF58BBA9 /* TranslationModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -168,8 +177,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */,
+				B41271B3DC00D229636CF296 /* KeychainService.swift in Sources */,
 				D768F965987410281BDB816B /* MainWindowView.swift in Sources */,
 				B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */,
+				CD36549DBC51132042765A45 /* OpenAIClient.swift in Sources */,
 				2B11B001D31BA028DAF79CF9 /* PDFDocumentStore.swift in Sources */,
 				CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */,
 				D488476EB571EFE254C53DF7 /* PDFPageRenderer.swift in Sources */,
@@ -179,6 +190,7 @@
 				C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */,
 				BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */,
 				4805301EBE4A4F1A457ED2CB /* TranslationInspectorView.swift in Sources */,
+				A723A0183D1C6130F3EE737A /* TranslationModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

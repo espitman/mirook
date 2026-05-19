@@ -351,7 +351,7 @@ Current progress:
 - [x] PDF opening and native PDF viewing are implemented.
 - [x] Basic page navigation and zoom controls are implemented.
 - [x] Page rendering pipeline is implemented for the current page.
-- [ ] OpenAI translation pipeline has not started yet.
+- [x] OpenAI translation pipeline is implemented and builds.
 
 ### Phase 1 — Project Setup
 
@@ -412,19 +412,19 @@ Goal: Send a full page image to OpenAI and receive structured translation data.
 
 Tasks:
 
-- [ ] Add API key storage in Keychain.
-- [ ] Implement `OpenAIClient`.
-- [ ] Build a Responses API request with image input.
-- [ ] Create structured JSON prompt.
-- [ ] Define and attach the translation JSON Schema.
-- [ ] Parse response into Swift models.
-- [ ] Handle Structured Output refusals and invalid responses.
-- [ ] Add retry behavior for transient network and rate-limit errors.
-- [ ] Display detected translated blocks in a debug panel.
+- [x] Add API key storage in Keychain.
+- [x] Implement `OpenAIClient`.
+- [x] Build a Responses API request with image input.
+- [x] Create structured JSON prompt.
+- [x] Define and attach the translation JSON Schema.
+- [x] Parse response into Swift models.
+- [x] Handle Structured Output refusals and invalid responses.
+- [x] Add retry behavior for transient network and rate-limit errors.
+- [x] Display detected translated blocks in a debug panel.
 
 Deliverable:
 
-- [ ] App can send one PDF page to OpenAI and receive Persian translated blocks with bounding boxes.
+- [x] App can send one PDF page to OpenAI and receive Persian translated blocks with bounding boxes.
 
 ---
 
