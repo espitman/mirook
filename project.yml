@@ -1,0 +1,21 @@
+name: Mirook
+options:
+  minimumXcodeGenVersion: 2.42.0
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MACOSX_DEPLOYMENT_TARGET: 14.0
+targets:
+  Mirook:
+    type: application
+    platform: macOS
+    sources:
+      - path: Mirook
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.espitman.Mirook
+        PRODUCT_NAME: Mirook
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Mirook
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

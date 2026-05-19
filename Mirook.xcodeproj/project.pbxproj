@@ -1,0 +1,351 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2B11B001D31BA028DAF79CF9 /* PDFDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */; };
+		3673CE34AAA9E5AB9C753188 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A318F86014A8807A2C59C5 /* ReaderView.swift */; };
+		4805301EBE4A4F1A457ED2CB /* TranslationInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */; };
+		B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */; };
+		B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB83DA844EDBDECF0D03691 /* MirookApp.swift */; };
+		BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */; };
+		BF99569C15AA2A90F1054EB4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 726EC6286C625CA612D58DDF /* Assets.xcassets */; };
+		C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */; };
+		C6F41B55A2F139B88BA436B7 /* PDFPageSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A91FA09881EE7790A589CD /* PDFPageSelection.swift */; };
+		CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */; };
+		D768F965987410281BDB816B /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 765E5EF13D1F45C5EB718690 /* MainWindowView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationInspectorView.swift; sourceTree = "<group>"; };
+		20821DB05F9C09894FB4B4D5 /* Mirook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mirook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		726EC6286C625CA612D58DDF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		765E5EF13D1F45C5EB718690 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyReaderState.swift; sourceTree = "<group>"; };
+		94A91FA09881EE7790A589CD /* PDFPageSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageSelection.swift; sourceTree = "<group>"; };
+		ACB83DA844EDBDECF0D03691 /* MirookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MirookApp.swift; sourceTree = "<group>"; };
+		BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFDocumentStore.swift; sourceTree = "<group>"; };
+		D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFKitView.swift; sourceTree = "<group>"; };
+		E4A318F86014A8807A2C59C5 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		4893C70CA17B15773537DBEE /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */,
+				765E5EF13D1F45C5EB718690 /* MainWindowView.swift */,
+				D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */,
+				E4A318F86014A8807A2C59C5 /* ReaderView.swift */,
+				314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */,
+				3C401F24A3EAF3AF2F5E47FC /* SidebarView.swift */,
+				00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		52584F6686D8EAF90527F802 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */,
+				94A91FA09881EE7790A589CD /* PDFPageSelection.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		6F5F3BA21525E19583411C0E = {
+			isa = PBXGroup;
+			children = (
+				81A9D7234DAD393B9BEE8147 /* Mirook */,
+				9E596C348833ACD8E8B8A2B2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		81A9D7234DAD393B9BEE8147 /* Mirook */ = {
+			isa = PBXGroup;
+			children = (
+				726EC6286C625CA612D58DDF /* Assets.xcassets */,
+				ACB83DA844EDBDECF0D03691 /* MirookApp.swift */,
+				52584F6686D8EAF90527F802 /* Models */,
+				4893C70CA17B15773537DBEE /* Views */,
+			);
+			path = Mirook;
+			sourceTree = "<group>";
+		};
+		9E596C348833ACD8E8B8A2B2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				20821DB05F9C09894FB4B4D5 /* Mirook.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		27276A260FA9C34DC54347A7 /* Mirook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 99F289D2DE73396EA23D6C53 /* Build configuration list for PBXNativeTarget "Mirook" */;
+			buildPhases = (
+				1704C5542F7714FC48BE2DD7 /* Sources */,
+				F8206B0BA2F779319A845DC4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Mirook;
+			packageProductDependencies = (
+			);
+			productName = Mirook;
+			productReference = 20821DB05F9C09894FB4B4D5 /* Mirook.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		54DAB87F2322866274ED0DC4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 5B4B775D469D3F81906ED654 /* Build configuration list for PBXProject "Mirook" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6F5F3BA21525E19583411C0E;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9E596C348833ACD8E8B8A2B2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				27276A260FA9C34DC54347A7 /* Mirook */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F8206B0BA2F779319A845DC4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF99569C15AA2A90F1054EB4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1704C5542F7714FC48BE2DD7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */,
+				D768F965987410281BDB816B /* MainWindowView.swift in Sources */,
+				B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */,
+				2B11B001D31BA028DAF79CF9 /* PDFDocumentStore.swift in Sources */,
+				CA182BEAF4FA762EAA3B7A62 /* PDFKitView.swift in Sources */,
+				C6F41B55A2F139B88BA436B7 /* PDFPageSelection.swift in Sources */,
+				3673CE34AAA9E5AB9C753188 /* ReaderView.swift in Sources */,
+				C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */,
+				BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */,
+				4805301EBE4A4F1A457ED2CB /* TranslationInspectorView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		6BA1579D112F55DD785AFB83 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Mirook;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.espitman.Mirook;
+				PRODUCT_NAME = Mirook;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		8203F42A6F3CB55E4B8E313B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		CDB60CB385C47D34C01A2D4E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Mirook;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.espitman.Mirook;
+				PRODUCT_NAME = Mirook;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		EA9AB3BBCDB0CE12C60CBA36 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5B4B775D469D3F81906ED654 /* Build configuration list for PBXProject "Mirook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EA9AB3BBCDB0CE12C60CBA36 /* Debug */,
+				8203F42A6F3CB55E4B8E313B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		99F289D2DE73396EA23D6C53 /* Build configuration list for PBXNativeTarget "Mirook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6BA1579D112F55DD785AFB83 /* Debug */,
+				CDB60CB385C47D34C01A2D4E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 54DAB87F2322866274ED0DC4 /* Project object */;
+}

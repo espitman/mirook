@@ -344,21 +344,30 @@ MVP settings:
 
 ## 4. Development Phases
 
+Current progress:
+
+- [x] Xcode project generated with XcodeGen.
+- [x] macOS SwiftUI app builds successfully.
+- [x] PDF opening and native PDF viewing are implemented.
+- [x] Basic page navigation and zoom controls are implemented.
+- [ ] Page rendering pipeline has not started yet.
+- [ ] OpenAI translation pipeline has not started yet.
+
 ### Phase 1 — Project Setup
 
 Goal: Create a working macOS shell app.
 
 Tasks:
 
-- Create Xcode macOS SwiftUI project.
-- Add basic sidebar and main reader area.
-- Add a simple app icon placeholder.
-- Add settings window placeholder.
-- Add file picker for opening PDFs.
+- [x] Create Xcode macOS SwiftUI project.
+- [x] Add basic sidebar and main reader area.
+- [x] Add a simple app icon placeholder.
+- [x] Add settings window placeholder.
+- [x] Add file picker for opening PDFs.
 
 Deliverable:
 
-- User can open the app and choose a PDF file.
+- [x] User can open the app and choose a PDF file.
 
 ---
 
@@ -368,15 +377,15 @@ Goal: Display PDFs natively.
 
 Tasks:
 
-- Integrate PDFKit with SwiftUI using `NSViewRepresentable`.
-- Load selected PDF into `PDFView`.
-- Add page navigation.
-- Add zoom controls.
-- Track current page.
+- [x] Integrate PDFKit with SwiftUI using `NSViewRepresentable`.
+- [x] Load selected PDF into `PDFView`.
+- [x] Add page navigation.
+- [x] Add zoom controls.
+- [x] Track current page.
 
 Deliverable:
 
-- User can open and read a PDF inside Mirook.
+- [x] User can open and read a PDF inside Mirook.
 
 ---
 
@@ -386,14 +395,14 @@ Goal: Convert selected PDF pages to images.
 
 Tasks:
 
-- Implement `PDFPageRenderer`.
-- Render current page to PNG.
-- Store page dimensions.
-- Preview rendered page for debugging.
+- [ ] Implement `PDFPageRenderer`.
+- [ ] Render current page to PNG.
+- [ ] Store page dimensions.
+- [ ] Preview rendered page for debugging.
 
 Deliverable:
 
-- App can render any selected PDF page as an image.
+- [ ] App can render any selected PDF page as an image.
 
 ---
 
@@ -403,19 +412,19 @@ Goal: Send a full page image to OpenAI and receive structured translation data.
 
 Tasks:
 
-- Add API key storage in Keychain.
-- Implement `OpenAIClient`.
-- Build a Responses API request with image input.
-- Create structured JSON prompt.
-- Define and attach the translation JSON Schema.
-- Parse response into Swift models.
-- Handle Structured Output refusals and invalid responses.
-- Add retry behavior for transient network and rate-limit errors.
-- Display detected translated blocks in a debug panel.
+- [ ] Add API key storage in Keychain.
+- [ ] Implement `OpenAIClient`.
+- [ ] Build a Responses API request with image input.
+- [ ] Create structured JSON prompt.
+- [ ] Define and attach the translation JSON Schema.
+- [ ] Parse response into Swift models.
+- [ ] Handle Structured Output refusals and invalid responses.
+- [ ] Add retry behavior for transient network and rate-limit errors.
+- [ ] Display detected translated blocks in a debug panel.
 
 Deliverable:
 
-- App can send one PDF page to OpenAI and receive Persian translated blocks with bounding boxes.
+- [ ] App can send one PDF page to OpenAI and receive Persian translated blocks with bounding boxes.
 
 ---
 
@@ -425,16 +434,16 @@ Goal: Generate a visual translated page.
 
 Tasks:
 
-- Use original page image as background.
-- Overlay translated Persian text blocks.
-- Implement right-to-left text drawing.
-- Fit text into bounding boxes.
-- Hide original English text areas.
-- Generate a translated page preview.
+- [ ] Use original page image as background.
+- [ ] Overlay translated Persian text blocks.
+- [ ] Implement right-to-left text drawing.
+- [ ] Fit text into bounding boxes.
+- [ ] Hide original English text areas.
+- [ ] Generate a translated page preview.
 
 Deliverable:
 
-- User can see a translated page that resembles the original page.
+- [ ] User can see a translated page that resembles the original page.
 
 ---
 
@@ -444,14 +453,14 @@ Goal: Export translated pages as a PDF.
 
 Tasks:
 
-- Convert translated page renderings into PDF pages.
-- Merge multiple pages.
-- Add save panel.
-- Export final PDF.
+- [ ] Convert translated page renderings into PDF pages.
+- [ ] Merge multiple pages.
+- [ ] Add save panel.
+- [ ] Export final PDF.
 
 Deliverable:
 
-- User can export selected translated pages as one continuous PDF.
+- [ ] User can export selected translated pages as one continuous PDF.
 
 ---
 
@@ -461,17 +470,17 @@ Goal: Make the app feel clean and stable.
 
 Tasks:
 
-- Add progress states.
-- Add error messages.
-- Add cancel translation button.
-- Add recent files.
-- Improve empty states.
-- Improve page range selection.
-- Add basic settings.
+- [ ] Add progress states.
+- [x] Add error messages.
+- [ ] Add cancel translation button.
+- [ ] Add recent files.
+- [x] Improve empty states.
+- [ ] Improve page range selection.
+- [x] Add basic settings.
 
 Deliverable:
 
-- MVP feels usable as a personal macOS utility.
+- [ ] MVP feels usable as a personal macOS utility.
 
 ## 5. Suggested MVP Timeline
 
