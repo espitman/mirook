@@ -15,15 +15,18 @@ struct PDFKitView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> PDFView {
-        let pdfView = HoverPDFView()
+        let pdfView = InteractivePDFView()
         pdfView.delegate = context.coordinator
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
         pdfView.backgroundColor = NSColor(calibratedRed: 0.94, green: 0.92, blue: 0.88, alpha: 1)
         pdfView.document = document
+        pdfView.onMouseClickedInView = { [weak coordinator = context.coordinator] point in
+            coordinator?.openTranslation(at: point)
+        }
         pdfView.onMouseMovedInView = { [weak coordinator = context.coordinator] point in
-            coordinator?.showTranslationIfNeeded(at: point)
+            coordinator?.hasTranslation(at: point) ?? false
         }
         pdfView.onEscapePressed = { [weak coordinator = context.coordinator] in
             Task { @MainActor in
@@ -75,6 +78,7 @@ struct PDFKitView: NSViewRepresentable {
         private var highlightAnnotation: PDFAnnotation?
         private var visibleParagraphID: String?
         private var visibleParagraphPosition: ParagraphPosition?
+        private var pendingParagraphPosition: ParagraphPosition?
 
         init(
             currentPageIndex: Binding<Int>,
@@ -101,40 +105,26 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         @MainActor
-        func showTranslationIfNeeded(at viewPoint: NSPoint) {
-            guard translationPopover?.isShown != true else {
+        func openTranslation(at viewPoint: NSPoint) {
+            guard let hit = translatedParagraphHit(at: viewPoint) else {
+                closeTranslationPopover()
                 return
             }
 
-            guard let pdfView,
-                  let document = pdfView.document,
-                  let page = pdfView.page(for: viewPoint, nearest: false) else {
+            guard visibleParagraphID != hit.block.id else {
                 return
             }
 
-            let pageIndex = document.index(for: page)
-            guard pageIndex != NSNotFound,
-                  let translatedTextPage = translatedTextPagesByIndex[pageIndex],
-                  !translatedTextPage.paragraphBlocks.isEmpty else {
+            guard let position = position(for: hit.block, pageIndex: hit.pageIndex) else {
                 return
             }
 
-            let pagePoint = pdfView.convert(viewPoint, to: page)
-            guard let paragraphBlock = translatedTextPage.paragraphBlocks.first(where: { block in
-                block.pdfBounds.cgRect.insetBy(dx: -3, dy: -3).contains(pagePoint)
-            }) else {
-                return
-            }
+            showTranslationPopover(at: position, animatedScroll: false)
+        }
 
-            guard visibleParagraphID != paragraphBlock.id else {
-                return
-            }
-
-            guard let position = position(for: paragraphBlock, pageIndex: pageIndex) else {
-                return
-            }
-
-            showTranslationPopover(at: position)
+        @MainActor
+        func hasTranslation(at viewPoint: NSPoint) -> Bool {
+            translatedParagraphHit(at: viewPoint) != nil
         }
 
         @MainActor
@@ -143,6 +133,7 @@ struct PDFKitView: NSViewRepresentable {
             translationPopover = nil
             visibleParagraphID = nil
             visibleParagraphPosition = nil
+            pendingParagraphPosition = nil
             clearHighlight()
         }
 
@@ -153,11 +144,14 @@ struct PDFKitView: NSViewRepresentable {
                 return
             }
 
-            showTranslationPopover(at: adjacentPosition)
+            showTranslationPopover(at: adjacentPosition, animatedScroll: true)
         }
 
         @MainActor
-        private func showTranslationPopover(at position: ParagraphPosition) {
+        private func showTranslationPopover(
+            at position: ParagraphPosition,
+            animatedScroll: Bool
+        ) {
             guard let pdfView,
                   let document = pdfView.document,
                   let page = document.page(at: position.pageIndex),
@@ -167,19 +161,65 @@ struct PDFKitView: NSViewRepresentable {
             }
 
             closeTranslationPopover()
+            pendingParagraphPosition = position
             if pdfView.currentPage !== page {
                 pdfView.go(to: page)
                 currentPageIndex = position.pageIndex
+                pdfView.layoutSubtreeIfNeeded()
             }
             highlightParagraph(block, on: page)
+
+            if animatedScroll {
+                scrollToParagraph(block, on: page, in: pdfView)
+
+                Task { @MainActor [weak self, weak pdfView, weak page] in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard let self,
+                          let pdfView,
+                          let page,
+                          self.pendingParagraphPosition == position else {
+                        return
+                    }
+
+                    self.presentTranslationPopover(
+                        block: block,
+                        position: position,
+                        page: page,
+                        pdfView: pdfView
+                    )
+                }
+                return
+            }
+
+            presentTranslationPopover(
+                block: block,
+                position: position,
+                page: page,
+                pdfView: pdfView
+            )
+        }
+
+        @MainActor
+        private func presentTranslationPopover(
+            block: TranslatedTextParagraphBlock,
+            position: ParagraphPosition,
+            page: PDFPage,
+            pdfView: PDFView
+        ) {
+            guard pendingParagraphPosition == position else {
+                return
+            }
 
             let popover = NSPopover()
             popover.animates = false
             popover.behavior = .applicationDefined
-            popover.contentSize = NSSize(width: 392, height: 236)
+            let popoverSize = popoverContentSize(for: page, in: pdfView)
+            popover.contentSize = popoverSize
             popover.contentViewController = NSHostingController(
                 rootView: ParagraphTranslationPopoverView(
                     block: block,
+                    width: popoverSize.width,
+                    height: popoverSize.height,
                     canGoPrevious: adjacentPosition(from: position, offset: -1) != nil,
                     canGoNext: adjacentPosition(from: position, offset: 1) != nil,
                     onPrevious: { [weak self] in
@@ -206,6 +246,43 @@ struct PDFKitView: NSViewRepresentable {
             translationPopover = popover
             visibleParagraphID = block.id
             visibleParagraphPosition = position
+            pendingParagraphPosition = nil
+        }
+
+        @MainActor
+        private func popoverContentSize(for page: PDFPage, in pdfView: PDFView) -> NSSize {
+            let pageWidthAt100 = page.bounds(for: pdfView.displayBox).width
+            let availableScreenWidth = max(480, (pdfView.window?.screen?.visibleFrame.width ?? pdfView.bounds.width) - 80)
+            let width = min(max(pageWidthAt100, 480), availableScreenWidth)
+            return NSSize(width: width, height: 360)
+        }
+
+        @MainActor
+        private func translatedParagraphHit(
+            at viewPoint: NSPoint
+        ) -> (pageIndex: Int, block: TranslatedTextParagraphBlock)? {
+            guard let pdfView,
+                  let document = pdfView.document,
+                  let page = pdfView.page(for: viewPoint, nearest: false) else {
+                return nil
+            }
+
+            let pageIndex = document.index(for: page)
+            guard pageIndex != NSNotFound,
+                  let translatedTextPage = translatedTextPagesByIndex[pageIndex],
+                  !translatedTextPage.paragraphBlocks.isEmpty else {
+                return nil
+            }
+
+            let pagePoint = pdfView.convert(viewPoint, to: page)
+            guard let paragraphBlock = translatedTextPage.paragraphBlocks.first(where: { block in
+                !block.translatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && block.pdfBounds.cgRect.insetBy(dx: -3, dy: -3).contains(pagePoint)
+            }) else {
+                return nil
+            }
+
+            return (pageIndex, paragraphBlock)
         }
 
         private func position(
@@ -257,6 +334,65 @@ struct PDFKitView: NSViewRepresentable {
             }
         }
 
+        @MainActor
+        private func scrollToParagraph(
+            _ block: TranslatedTextParagraphBlock,
+            on page: PDFPage,
+            in pdfView: PDFView
+        ) {
+            guard let scrollView = pdfView.firstDescendant(ofType: NSScrollView.self),
+                  let documentView = scrollView.documentView else {
+                let destination = PDFDestination(
+                    page: page,
+                    at: NSPoint(
+                        x: block.pdfBounds.cgRect.midX,
+                        y: block.pdfBounds.cgRect.midY
+                    )
+                )
+                pdfView.go(to: destination)
+                return
+            }
+
+            let rectInPDFView = pdfView.convert(block.pdfBounds.cgRect, from: page)
+            let rectInWindow = pdfView.convert(rectInPDFView, to: nil)
+            let rectInDocumentView = documentView.convert(rectInWindow, from: nil)
+            let visibleBounds = scrollView.contentView.bounds
+            let documentBounds = documentView.bounds
+
+            let maxX = max(documentBounds.minX, documentBounds.maxX - visibleBounds.width)
+            let maxY = max(documentBounds.minY, documentBounds.maxY - visibleBounds.height)
+            let targetOrigin = NSPoint(
+                x: clamp(
+                    rectInDocumentView.midX - visibleBounds.width * 0.5,
+                    min: documentBounds.minX,
+                    max: maxX
+                ),
+                y: clamp(
+                    rectInDocumentView.midY - visibleBounds.height * 0.46,
+                    min: documentBounds.minY,
+                    max: maxY
+                )
+            )
+
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.28
+                context.allowsImplicitAnimation = true
+                scrollView.contentView.animator().setBoundsOrigin(targetOrigin)
+            } completionHandler: {
+                Task { @MainActor [weak scrollView] in
+                    guard let scrollView else {
+                        return
+                    }
+
+                    scrollView.reflectScrolledClipView(scrollView.contentView)
+                }
+            }
+        }
+
+        private func clamp(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
+            Swift.min(Swift.max(value, min), max)
+        }
+
         private func highlightParagraph(_ block: TranslatedTextParagraphBlock, on page: PDFPage) {
             clearHighlight()
 
@@ -290,10 +426,27 @@ private struct ParagraphPosition: Equatable {
     let blockIndex: Int
 }
 
-private final class HoverPDFView: PDFView {
-    var onMouseMovedInView: ((NSPoint) -> Void)?
+private extension NSView {
+    func firstDescendant<T: NSView>(ofType type: T.Type) -> T? {
+        for subview in subviews {
+            if let match = subview as? T {
+                return match
+            }
+
+            if let match = subview.firstDescendant(ofType: type) {
+                return match
+            }
+        }
+
+        return nil
+    }
+}
+
+private final class InteractivePDFView: PDFView {
+    var onMouseClickedInView: ((NSPoint) -> Void)?
+    var onMouseMovedInView: ((NSPoint) -> Bool)?
     var onEscapePressed: (() -> Void)?
-    private var hoverTrackingArea: NSTrackingArea?
+    private var cursorTrackingArea: NSTrackingArea?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -301,8 +454,8 @@ private final class HoverPDFView: PDFView {
     }
 
     override func updateTrackingAreas() {
-        if let hoverTrackingArea {
-            removeTrackingArea(hoverTrackingArea)
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
         }
 
         let trackingArea = NSTrackingArea(
@@ -311,17 +464,28 @@ private final class HoverPDFView: PDFView {
             owner: self
         )
         addTrackingArea(trackingArea)
-        hoverTrackingArea = trackingArea
+        cursorTrackingArea = trackingArea
         super.updateTrackingAreas()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onMouseClickedInView?(convert(event.locationInWindow, from: nil))
     }
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        onMouseMovedInView?(convert(event.locationInWindow, from: nil))
+        let point = convert(event.locationInWindow, from: nil)
+        if onMouseMovedInView?(point) == true {
+            NSCursor.pointingHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        NSCursor.arrow.set()
     }
 
     override func keyDown(with event: NSEvent) {
@@ -336,6 +500,8 @@ private final class HoverPDFView: PDFView {
 
 private struct ParagraphTranslationPopoverView: View {
     let block: TranslatedTextParagraphBlock
+    let width: CGFloat
+    let height: CGFloat
     let canGoPrevious: Bool
     let canGoNext: Bool
     let onPrevious: () -> Void
@@ -383,7 +549,7 @@ private struct ParagraphTranslationPopoverView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(12)
-        .frame(width: 392, height: 236)
+        .frame(width: width, height: height)
         .background(MirookTheme.panelBackground)
         .environment(\.layoutDirection, .rightToLeft)
         .onExitCommand(perform: onClose)
