@@ -23,6 +23,7 @@
 - UserDefaults for simple preferences
 - Keychain for OpenAI API key
 - Local file system for imported PDFs and generated exports
+- Per-book translation projects stored under `~/Documents/Mirook/Projects`
 
 ## 2. High-Level Architecture
 
@@ -465,6 +466,7 @@ Tasks:
 - [x] Add editable text PDF style controls and bundled Vazirmatn font.
 - [x] Preserve blank source pages in text PDF export.
 - [x] Persist text translation projects so books can be translated in multiple parts and exported as one complete PDF.
+- [x] Store each book project in a readable folder under `~/Documents/Mirook/Projects`, with migration from the older Application Support location.
 
 Deliverable:
 
