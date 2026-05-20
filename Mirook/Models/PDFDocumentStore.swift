@@ -52,6 +52,7 @@ final class PDFDocumentStore: ObservableObject {
     private let textPDFExportService = TextPDFExportService()
     private let translationProjectStore = TranslationProjectStore()
     private let keychainService = KeychainService()
+    private static let currentParagraphLayoutVersion = 3
 
     private enum SettingsKey {
         static let openAIAPIKeyAccount = "openai-api-key"
@@ -640,7 +641,7 @@ final class PDFDocumentStore: ObservableObject {
                     continue
                 }
 
-                let sourceText = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let sourceText = sourceTextForTranslation(on: page)
                 guard !sourceText.isEmpty else {
                     blankPageNumbers.append(pageNumber)
                     try cacheTranslatedTextPage(blankTextPage(pageNumber: pageNumber))
@@ -695,7 +696,8 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     private func hydrateParagraphBlocksForLoadedPages(document: PDFDocument, projectID: String) {
-        for page in translatedTextPagesByIndex.values where page.paragraphBlocks.isEmpty && !page.isBlank {
+        for page in translatedTextPagesByIndex.values
+        where !page.isBlank && page.paragraphLayoutVersion < Self.currentParagraphLayoutVersion {
             guard let pdfPage = document.page(at: page.pageIndex) else {
                 continue
             }
@@ -710,7 +712,8 @@ final class PDFDocumentStore: ObservableObject {
                 sourceText: page.sourceText,
                 translatedText: page.translatedText,
                 isBlank: page.isBlank,
-                paragraphBlocks: blocks
+                paragraphBlocks: blocks,
+                paragraphLayoutVersion: Self.currentParagraphLayoutVersion
             )
             translatedTextPagesByIndex[page.pageIndex] = updatedPage
             try? translationProjectStore.savePage(updatedPage, projectID: projectID)
@@ -718,8 +721,7 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     private func paragraphBlockHydratedPage(_ page: TranslatedTextPage) -> TranslatedTextPage {
-        guard page.paragraphBlocks.isEmpty,
-              !page.isBlank,
+        guard !page.isBlank,
               let pdfPage = document?.page(at: page.pageIndex) else {
             return page
         }
@@ -734,38 +736,32 @@ final class PDFDocumentStore: ObservableObject {
             sourceText: page.sourceText,
             translatedText: page.translatedText,
             isBlank: page.isBlank,
-            paragraphBlocks: blocks
+            paragraphBlocks: blocks,
+            paragraphLayoutVersion: Self.currentParagraphLayoutVersion
         )
     }
 
-    private func makeParagraphBlocks(
-        for textPage: TranslatedTextPage,
-        pdfPage: PDFPage
-    ) -> [TranslatedTextParagraphBlock] {
-        let translatedParagraphs = splitParagraphs(textPage.translatedText)
-        guard !translatedParagraphs.isEmpty else {
-            return []
+    private func sourceTextForTranslation(on page: PDFPage) -> String {
+        let clusteredText = sourceParagraphClusters(for: page)
+            .map(\.text)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+
+        if !clusteredText.isEmpty {
+            return clusteredText
         }
 
+        return (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sourceParagraphClusters(for pdfPage: PDFPage) -> [ParagraphCluster] {
         let pageBounds = pdfPage.bounds(for: .mediaBox)
         guard let selection = pdfPage.selection(for: pageBounds) else {
             return []
         }
 
-        let lines = selection.selectionsByLine().compactMap { line -> TextLine? in
-            let text = line.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let bounds = line.bounds(for: pdfPage)
-            guard !text.isEmpty,
-                  bounds.width > 4,
-                  bounds.height > 4,
-                  bounds.width < pageBounds.width * 0.96,
-                  bounds.height < pageBounds.height * 0.2 else {
-                return nil
-            }
-            return (text, bounds)
-        }
-
-        var clusters = textClusters(from: lines).compactMap { cluster -> ParagraphCluster? in
+        let lines = readableTextLines(from: selection, on: pdfPage, pageBounds: pageBounds)
+        return textClusters(from: lines).compactMap { cluster -> ParagraphCluster? in
             guard let bounds = unionRect(for: cluster) else {
                 return nil
             }
@@ -781,22 +777,51 @@ final class PDFDocumentStore: ObservableObject {
                 role: role
             )
         }
+    }
+
+    private func readableTextLines(
+        from selection: PDFSelection,
+        on page: PDFPage,
+        pageBounds: CGRect
+    ) -> [TextLine] {
+        selection.selectionsByLine().compactMap { line -> TextLine? in
+            let text = line.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let bounds = line.bounds(for: page)
+            guard !text.isEmpty,
+                  bounds.width > 4,
+                  bounds.height > 4,
+                  bounds.width < pageBounds.width * 0.96,
+                  bounds.height < pageBounds.height * 0.2 else {
+                return nil
+            }
+            return (text, bounds)
+        }
+    }
+
+    private func makeParagraphBlocks(
+        for textPage: TranslatedTextPage,
+        pdfPage: PDFPage
+    ) -> [TranslatedTextParagraphBlock] {
+        let translatedParagraphs = splitParagraphs(textPage.translatedText)
+        guard !translatedParagraphs.isEmpty else {
+            return []
+        }
+
+        let clusters = sourceParagraphClusters(for: pdfPage)
 
         guard !clusters.isEmpty else {
             return []
         }
 
-        var alignedTranslations = translatedParagraphs
-        let originalClusterCount = clusters.count
-        let originalTranslationCount = alignedTranslations.count
-
-        if clusters.count > alignedTranslations.count {
-            clusters = mergedClusters(clusters, targetCount: alignedTranslations.count)
-        } else if alignedTranslations.count > clusters.count {
-            alignedTranslations = mergedParagraphs(alignedTranslations, targetCount: clusters.count)
+        let alignedTranslations = alignedTranslatedParagraphs(
+            translatedParagraphs,
+            targetClusters: clusters
+        )
+        guard alignedTranslations.count == clusters.count else {
+            return []
         }
 
-        let confidence = originalClusterCount == originalTranslationCount ? 1.0 : 0.62
+        let confidence = translatedParagraphs.count == clusters.count ? 1.0 : 0.72
         return zip(clusters.indices, zip(clusters, alignedTranslations)).map { index, pair in
             let (cluster, translatedParagraph) = pair
             return TranslatedTextParagraphBlock(
@@ -823,7 +848,7 @@ final class PDFDocumentStore: ObservableObject {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmedLine.isEmpty {
                 if !currentLines.isEmpty {
-                    paragraphs.append(currentLines.joined(separator: "\n"))
+                    paragraphs.append(currentLines.joined(separator: " "))
                     currentLines = []
                 }
             } else {
@@ -832,10 +857,146 @@ final class PDFDocumentStore: ObservableObject {
         }
 
         if !currentLines.isEmpty {
-            paragraphs.append(currentLines.joined(separator: "\n"))
+            paragraphs.append(currentLines.joined(separator: " "))
         }
 
         return paragraphs
+    }
+
+    private func alignedTranslatedParagraphs(_ paragraphs: [String], targetClusters: [ParagraphCluster]) -> [String] {
+        let targetCount = targetClusters.count
+        guard targetCount > 0 else {
+            return []
+        }
+
+        if paragraphs.count == targetCount {
+            return paragraphs
+        }
+
+        if paragraphs.count > targetCount {
+            return mergedParagraphs(paragraphs, targetCount: targetCount)
+        }
+
+        return expandedParagraphs(paragraphs, targetClusters: targetClusters)
+    }
+
+    private func expandedParagraphs(_ paragraphs: [String], targetClusters: [ParagraphCluster]) -> [String] {
+        let targetCount = targetClusters.count
+        guard targetCount > 0, paragraphs.count < targetCount else {
+            return paragraphs
+        }
+
+        let translatedSentences = sentenceSegments(in: paragraphs.joined(separator: " "))
+        if translatedSentences.count >= targetCount {
+            return distributedSegments(translatedSentences, targetClusters: targetClusters)
+        }
+
+        var result = paragraphs
+        while result.count < targetCount {
+            let splitCandidate = result.indices
+                .map { index in (index: index, parts: splitParagraphOnce(result[index]), length: result[index].count) }
+                .filter { $0.parts.count == 2 }
+                .max { $0.length < $1.length }
+
+            guard let splitCandidate else {
+                break
+            }
+
+            result.replaceSubrange(splitCandidate.index...splitCandidate.index, with: splitCandidate.parts)
+        }
+
+        return result
+    }
+
+    private func distributedSegments(_ segments: [String], targetClusters: [ParagraphCluster]) -> [String] {
+        guard !targetClusters.isEmpty, segments.count >= targetClusters.count else {
+            return segments
+        }
+
+        let weights = targetClusters.map { cluster in
+            max(sentenceSegments(in: cluster.text).count, cluster.text.split(whereSeparator: \.isWhitespace).count / 35, 1)
+        }
+        let totalWeight = max(weights.reduce(0, +), 1)
+        var result: [String] = []
+        var cursor = 0
+        var cumulativeWeight = 0
+
+        for index in targetClusters.indices {
+            cumulativeWeight += weights[index]
+
+            let remainingGroups = targetClusters.count - index - 1
+            let idealEnd = Int((Double(segments.count) * Double(cumulativeWeight) / Double(totalWeight)).rounded())
+            let minimumEnd = cursor + 1
+            let maximumEnd = segments.count - remainingGroups
+            let end = min(max(idealEnd, minimumEnd), maximumEnd)
+
+            result.append(segments[cursor..<end].joined(separator: " "))
+            cursor = end
+        }
+
+        return result
+    }
+
+    private func splitParagraphOnce(_ paragraph: String) -> [String] {
+        let sentences = sentenceSegments(in: paragraph)
+        if sentences.count > 1 {
+            let totalCharacters = sentences.reduce(0) { $0 + $1.count }
+            let targetCharacters = max(totalCharacters / 2, 1)
+            var firstHalf: [String] = []
+            var secondHalf: [String] = []
+            var consumedCharacters = 0
+
+            for sentence in sentences {
+                if consumedCharacters < targetCharacters || firstHalf.isEmpty {
+                    firstHalf.append(sentence)
+                    consumedCharacters += sentence.count
+                } else {
+                    secondHalf.append(sentence)
+                }
+            }
+
+            if !firstHalf.isEmpty, !secondHalf.isEmpty {
+                return [
+                    firstHalf.joined(separator: " "),
+                    secondHalf.joined(separator: " ")
+                ]
+            }
+        }
+
+        let words = paragraph.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard words.count >= 12 else {
+            return [paragraph]
+        }
+
+        let midpoint = words.count / 2
+        return [
+            words[..<midpoint].joined(separator: " "),
+            words[midpoint...].joined(separator: " ")
+        ]
+    }
+
+    private func sentenceSegments(in paragraph: String) -> [String] {
+        let terminators = Set<Character>(".!?؟。")
+        var segments: [String] = []
+        var current = ""
+
+        for character in paragraph {
+            current.append(character)
+            if terminators.contains(character) {
+                let segment = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !segment.isEmpty {
+                    segments.append(segment)
+                }
+                current = ""
+            }
+        }
+
+        let remaining = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remaining.isEmpty {
+            segments.append(remaining)
+        }
+
+        return segments
     }
 
     private func mergedClusters(_ clusters: [ParagraphCluster], targetCount: Int) -> [ParagraphCluster] {
@@ -943,44 +1104,24 @@ final class PDFDocumentStore: ObservableObject {
 
     private func makeTextBasedMockTranslatedPage(for page: PDFPage, renderedPage: RenderedPage) -> TranslatedPage? {
         let pageBounds = page.bounds(for: .mediaBox)
-        guard let selection = page.selection(for: pageBounds) else {
-            return nil
-        }
-
-        let lines = selection.selectionsByLine().compactMap { line -> TextLine? in
-            let text = line.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let bounds = line.bounds(for: page)
-            guard !text.isEmpty,
-                  bounds.width > 4,
-                  bounds.height > 4,
-                  bounds.width < pageBounds.width * 0.96,
-                  bounds.height < pageBounds.height * 0.2 else {
-                return nil
-            }
-            return (text, bounds)
-        }
-
-        let clusters = textClusters(from: lines)
+        let clusters = sourceParagraphClusters(for: page)
         let blocks = clusters.enumerated().compactMap { index, cluster -> TranslatedTextBlock? in
-            guard !cluster.isEmpty,
-                  let selectionBounds = unionRect(for: cluster) else {
+            guard !cluster.text.isEmpty else {
                 return nil
             }
 
-            let text = cluster.map(\.text).joined(separator: " ")
-            let role = inferredRole(for: cluster, bounds: selectionBounds, pageBounds: pageBounds)
             let bbox = imageBoundingBox(
-                from: expandedRect(selectionBounds, in: pageBounds),
+                from: cluster.bounds,
                 pageBounds: pageBounds,
                 scale: renderedPage.scale
             )
 
             return TranslatedTextBlock(
                 id: "mock_pdf_text_\(index)",
-                sourceText: text,
-                translatedText: mockPersianText(for: text, role: role),
+                sourceText: cluster.text,
+                translatedText: mockPersianText(for: cluster.text, role: cluster.role),
                 bbox: bbox,
-                role: role,
+                role: cluster.role,
                 confidence: 1
             )
         }
@@ -1009,7 +1150,14 @@ final class PDFDocumentStore: ObservableObject {
         }
         let sortedHeights = sortedLines.map(\.rect.height).sorted()
         let medianLineHeight = sortedHeights[sortedHeights.count / 2]
-        let verticalSplitThreshold = max(medianLineHeight * 0.7, 7)
+        let sortedWidths = sortedLines.map(\.rect.width).sorted()
+        let referenceLineWidth = sortedWidths[min(sortedWidths.count * 3 / 4, sortedWidths.count - 1)]
+        let sortedGaps = zip(sortedLines, sortedLines.dropFirst())
+            .map { max(0, $0.rect.minY - $1.rect.maxY) }
+            .filter { $0 > 0 }
+            .sorted()
+        let medianLineGap = sortedGaps.isEmpty ? medianLineHeight * 0.25 : sortedGaps[sortedGaps.count / 2]
+        let verticalSplitThreshold = max(medianLineHeight * 0.85, medianLineGap * 1.9, 8)
         let leftEdge = sortedLines.map(\.rect.minX).sorted()[sortedLines.count / 4]
         let indentThreshold = max(medianLineHeight * 0.75, 9)
 
@@ -1021,13 +1169,20 @@ final class PDFDocumentStore: ObservableObject {
             let verticalGap = previousLine.map { $0.rect.minY - line.rect.maxY } ?? 0
             let startsIndented = line.rect.minX > leftEdge + indentThreshold
             let previousEndsParagraph = previousLine.map { lineLooksLikeParagraphEnd($0.text) } ?? false
+            let previousIsShortTerminalLine = previousLine.map {
+                previousEndsParagraph && $0.rect.width < referenceLineWidth * 0.78
+            } ?? false
+            let startsNearBodyEdge = abs(line.rect.minX - leftEdge) <= indentThreshold * 1.4
             let shouldStartByIndent = !currentCluster.isEmpty &&
                 startsIndented &&
-                previousEndsParagraph &&
-                currentCluster.count > 1
+                (previousEndsParagraph || verticalGap > medianLineHeight * 0.2)
+            let shouldStartAfterShortTerminalLine = !currentCluster.isEmpty &&
+                previousIsShortTerminalLine &&
+                startsNearBodyEdge &&
+                verticalGap >= -2
             let shouldStartByGap = !currentCluster.isEmpty && verticalGap > verticalSplitThreshold
 
-            if shouldStartByGap || shouldStartByIndent {
+            if shouldStartByGap || shouldStartByIndent || shouldStartAfterShortTerminalLine {
                 clusters.append(currentCluster)
                 currentCluster = [line]
             } else {

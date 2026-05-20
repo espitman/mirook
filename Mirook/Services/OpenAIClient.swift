@@ -475,6 +475,10 @@ struct OpenAIClient {
         Translate the following book page into fluent \(targetLanguage).
         \(languageStyleInstruction(targetLanguage: targetLanguage))
         Preserve paragraph breaks, headings, names, numbers, references, and tone.
+        The source text is separated into paragraphs with blank lines.
+        Keep each source paragraph as exactly one translated paragraph.
+        Do not merge adjacent paragraphs, split one paragraph into multiple paragraphs, or keep PDF line wraps inside a paragraph.
+        Separate translated paragraphs with one blank line.
         Do not summarize.
         Return only the translated text. Do not wrap the answer in Markdown.
 
@@ -489,6 +493,7 @@ struct OpenAIClient {
             Translate into smooth, natural, contemporary Persian that reads like a professionally edited book.
             Do not translate word-for-word when it makes Persian sound stiff or unnatural.
             Preserve the author's meaning, tone, paragraph structure, names, numbers, citations, and references.
+            Keep blank-line-separated source paragraphs as separate translated paragraphs.
             Keep technical or proper nouns stable when translating them would be misleading.
             Return only the requested output format, without explanations or Markdown.
             """

@@ -7,19 +7,22 @@ struct TranslatedTextPage: Identifiable, Codable {
     let translatedText: String
     let isBlank: Bool
     let paragraphBlocks: [TranslatedTextParagraphBlock]
+    let paragraphLayoutVersion: Int
 
     init(
         pageIndex: Int,
         sourceText: String,
         translatedText: String,
         isBlank: Bool,
-        paragraphBlocks: [TranslatedTextParagraphBlock] = []
+        paragraphBlocks: [TranslatedTextParagraphBlock] = [],
+        paragraphLayoutVersion: Int = 0
     ) {
         self.pageIndex = pageIndex
         self.sourceText = sourceText
         self.translatedText = translatedText
         self.isBlank = isBlank
         self.paragraphBlocks = paragraphBlocks
+        self.paragraphLayoutVersion = paragraphLayoutVersion
     }
 
     var pageNumber: Int {
@@ -32,6 +35,7 @@ struct TranslatedTextPage: Identifiable, Codable {
         case translatedText
         case isBlank
         case paragraphBlocks
+        case paragraphLayoutVersion
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +45,7 @@ struct TranslatedTextPage: Identifiable, Codable {
         translatedText = try container.decode(String.self, forKey: .translatedText)
         isBlank = try container.decode(Bool.self, forKey: .isBlank)
         paragraphBlocks = try container.decodeIfPresent([TranslatedTextParagraphBlock].self, forKey: .paragraphBlocks) ?? []
+        paragraphLayoutVersion = try container.decodeIfPresent(Int.self, forKey: .paragraphLayoutVersion) ?? 0
     }
 
     func encode(to encoder: Encoder) throws {
@@ -52,6 +57,7 @@ struct TranslatedTextPage: Identifiable, Codable {
 
         if !paragraphBlocks.isEmpty {
             try container.encode(paragraphBlocks, forKey: .paragraphBlocks)
+            try container.encode(paragraphLayoutVersion, forKey: .paragraphLayoutVersion)
         }
     }
 }
