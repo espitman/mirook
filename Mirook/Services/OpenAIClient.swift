@@ -260,9 +260,11 @@ struct OpenAIClient {
     ) throws -> Data {
         let imageBase64 = renderedPage.imageData.base64EncodedString()
         let prompt = translationPrompt(renderedPage: renderedPage, targetLanguage: targetLanguage)
+        let systemPrompt = translationSystemPrompt(targetLanguage: targetLanguage)
 
         let body: [String: Any] = [
             "model": model,
+            "instructions": systemPrompt,
             "input": [
                 [
                     "role": "user",
@@ -330,6 +332,10 @@ struct OpenAIClient {
             "model": model,
             "messages": [
                 [
+                    "role": "system",
+                    "content": translationSystemPrompt(targetLanguage: targetLanguage)
+                ],
+                [
                     "role": "user",
                     "content": [
                         [
@@ -365,6 +371,7 @@ struct OpenAIClient {
         Analyze the full page image.
         Detect readable text blocks.
         Translate only normal readable text.
+        \(languageStyleInstruction(targetLanguage: targetLanguage))
         Do not translate images, charts, diagrams, logos, decorative elements, or non-text visual content.
         Return JSON that matches the expected translation contract.
         Bounding boxes must use the rendered image coordinate system.
@@ -379,8 +386,10 @@ struct OpenAIClient {
         targetLanguage: String,
         model: String
     ) throws -> Data {
+        let systemPrompt = translationSystemPrompt(targetLanguage: targetLanguage)
         let body: [String: Any] = [
             "model": model,
+            "instructions": systemPrompt,
             "input": [
                 [
                     "role": "user",
@@ -410,6 +419,10 @@ struct OpenAIClient {
             "model": model,
             "messages": [
                 [
+                    "role": "system",
+                    "content": translationSystemPrompt(targetLanguage: targetLanguage)
+                ],
+                [
                     "role": "user",
                     "content": textTranslationPrompt(text: text, targetLanguage: targetLanguage)
                 ]
@@ -427,12 +440,47 @@ struct OpenAIClient {
     private func textTranslationPrompt(text: String, targetLanguage: String) -> String {
         """
         Translate the following book page into fluent \(targetLanguage).
+        \(languageStyleInstruction(targetLanguage: targetLanguage))
         Preserve paragraph breaks, headings, names, numbers, references, and tone.
         Do not summarize.
         Return only the translated text. Do not wrap the answer in Markdown.
 
         \(text)
         """
+    }
+
+    private func translationSystemPrompt(targetLanguage: String) -> String {
+        if isPersianTargetLanguage(targetLanguage) {
+            return """
+            You are an expert literary translator into Persian.
+            Translate into smooth, natural, contemporary Persian that reads like a professionally edited book.
+            Do not translate word-for-word when it makes Persian sound stiff or unnatural.
+            Preserve the author's meaning, tone, paragraph structure, names, numbers, citations, and references.
+            Keep technical or proper nouns stable when translating them would be misleading.
+            Return only the requested output format, without explanations or Markdown.
+            """
+        }
+
+        return """
+        You are an expert literary translator into \(targetLanguage).
+        Translate naturally and fluently, preserving the author's meaning, tone, paragraph structure, names, numbers, citations, and references.
+        Return only the requested output format, without explanations or Markdown.
+        """
+    }
+
+    private func languageStyleInstruction(targetLanguage: String) -> String {
+        if isPersianTargetLanguage(targetLanguage) {
+            return "Because the target language is Persian, use fluent, natural Persian prose rather than literal word-by-word translation."
+        }
+
+        return "Use fluent, natural \(targetLanguage) rather than literal word-by-word translation."
+    }
+
+    private func isPersianTargetLanguage(_ targetLanguage: String) -> Bool {
+        let normalized = targetLanguage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.contains("persian") ||
+            normalized.contains("farsi") ||
+            normalized.contains("فارسی")
     }
 
     private func endpointURL(path: String) -> URL? {
