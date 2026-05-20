@@ -25,6 +25,11 @@ struct PDFKitView: NSViewRepresentable {
         pdfView.onMouseMovedInView = { [weak coordinator = context.coordinator] point in
             coordinator?.showTranslationIfNeeded(at: point)
         }
+        pdfView.onEscapePressed = { [weak coordinator = context.coordinator] in
+            Task { @MainActor in
+                coordinator?.closeTranslationPopover()
+            }
+        }
 
         NotificationCenter.default.addObserver(
             context.coordinator,
@@ -56,7 +61,9 @@ struct PDFKitView: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: PDFView, coordinator: Coordinator) {
         NotificationCenter.default.removeObserver(coordinator)
-        coordinator.closeTranslationPopover()
+        Task { @MainActor in
+            coordinator.closeTranslationPopover()
+        }
     }
 
     final class Coordinator: NSObject, PDFViewDelegate {
@@ -64,6 +71,8 @@ struct PDFKitView: NSViewRepresentable {
         var translatedTextPagesByIndex: [Int: TranslatedTextPage]
         weak var pdfView: PDFView?
         private var translationPopover: NSPopover?
+        private weak var highlightedPage: PDFPage?
+        private var highlightAnnotation: PDFAnnotation?
         private var visibleParagraphID: String?
 
         init(
@@ -92,10 +101,13 @@ struct PDFKitView: NSViewRepresentable {
 
         @MainActor
         func showTranslationIfNeeded(at viewPoint: NSPoint) {
+            guard translationPopover?.isShown != true else {
+                return
+            }
+
             guard let pdfView,
                   let document = pdfView.document,
                   let page = pdfView.page(for: viewPoint, nearest: false) else {
-                closeTranslationPopover()
                 return
             }
 
@@ -103,7 +115,6 @@ struct PDFKitView: NSViewRepresentable {
             guard pageIndex != NSNotFound,
                   let translatedTextPage = translatedTextPagesByIndex[pageIndex],
                   !translatedTextPage.paragraphBlocks.isEmpty else {
-                closeTranslationPopover()
                 return
             }
 
@@ -111,7 +122,6 @@ struct PDFKitView: NSViewRepresentable {
             guard let paragraphBlock = translatedTextPage.paragraphBlocks.first(where: { block in
                 block.pdfBounds.cgRect.insetBy(dx: -3, dy: -3).contains(pagePoint)
             }) else {
-                closeTranslationPopover()
                 return
             }
 
@@ -120,13 +130,21 @@ struct PDFKitView: NSViewRepresentable {
             }
 
             closeTranslationPopover()
+            highlightParagraph(paragraphBlock, on: page)
 
             let popover = NSPopover()
             popover.animates = false
-            popover.behavior = .transient
-            popover.contentSize = NSSize(width: 340, height: 190)
+            popover.behavior = .applicationDefined
+            popover.contentSize = NSSize(width: 360, height: 220)
             popover.contentViewController = NSHostingController(
-                rootView: ParagraphTranslationPopoverView(block: paragraphBlock)
+                rootView: ParagraphTranslationPopoverView(
+                    block: paragraphBlock,
+                    onClose: { [weak self] in
+                        Task { @MainActor in
+                            self?.closeTranslationPopover()
+                        }
+                    }
+                )
             )
 
             let sourceRectInView = pdfView.convert(paragraphBlock.pdfBounds.cgRect, from: page)
@@ -141,12 +159,40 @@ struct PDFKitView: NSViewRepresentable {
             translationPopover?.close()
             translationPopover = nil
             visibleParagraphID = nil
+            clearHighlight()
+        }
+
+        private func highlightParagraph(_ block: TranslatedTextParagraphBlock, on page: PDFPage) {
+            clearHighlight()
+
+            let annotationBounds = block.pdfBounds.cgRect.insetBy(dx: -2, dy: -2)
+            let annotation = PDFAnnotation(
+                bounds: annotationBounds,
+                forType: .highlight,
+                withProperties: nil
+            )
+            annotation.color = NSColor.systemYellow.withAlphaComponent(0.42)
+            page.addAnnotation(annotation)
+
+            highlightedPage = page
+            highlightAnnotation = annotation
+        }
+
+        private func clearHighlight() {
+            if let highlightedPage,
+               let highlightAnnotation {
+                highlightedPage.removeAnnotation(highlightAnnotation)
+            }
+
+            highlightedPage = nil
+            highlightAnnotation = nil
         }
     }
 }
 
 private final class HoverPDFView: PDFView {
     var onMouseMovedInView: ((NSPoint) -> Void)?
+    var onEscapePressed: (() -> Void)?
     private var hoverTrackingArea: NSTrackingArea?
 
     override func viewDidMoveToWindow() {
@@ -177,35 +223,123 @@ private final class HoverPDFView: PDFView {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
     }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscapePressed?()
+            return
+        }
+
+        super.keyDown(with: event)
+    }
 }
 
 private struct ParagraphTranslationPopoverView: View {
     let block: TranslatedTextParagraphBlock
+    let onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
             HStack {
-                Spacer()
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(MirookIconButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                .help("Close translation")
 
                 Text("ترجمه")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(MirookTheme.mutedInk)
+
+                Spacer()
             }
 
-            ScrollView(.vertical) {
-                Text(block.translatedText)
-                    .font(MirookFontRegistrar.vazirmatnFont(size: 15))
-                    .foregroundStyle(MirookTheme.ink)
-                    .multilineTextAlignment(.trailing)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.vertical, 2)
-            }
+            RTLPopoverTextView(text: block.translatedText, onEscape: onClose)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(12)
-        .frame(width: 340, height: 190)
+        .frame(width: 360, height: 220)
         .background(MirookTheme.panelBackground)
         .environment(\.layoutDirection, .rightToLeft)
+        .onExitCommand(perform: onClose)
+    }
+}
+
+private struct RTLPopoverTextView: NSViewRepresentable {
+    let text: String
+    let onEscape: () -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = false
+
+        let textView = EscapeAwareTextView()
+        textView.onEscape = onEscape
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textColor = .labelColor
+        textView.font = MirookFontRegistrar.vazirmatnRegular(size: 15)
+        textView.alignment = .right
+        textView.baseWritingDirection = .rightToLeft
+        textView.textContainerInset = NSSize(width: 2, height: 2)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? EscapeAwareTextView else {
+            return
+        }
+
+        textView.onEscape = onEscape
+
+        if textView.string != text {
+            textView.string = text
+        }
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .right
+        paragraphStyle.baseWritingDirection = .rightToLeft
+
+        let fullRange = NSRange(location: 0, length: textView.string.utf16.count)
+        textView.font = MirookFontRegistrar.vazirmatnRegular(size: 15)
+        textView.alignment = .right
+        textView.baseWritingDirection = .rightToLeft
+        textView.setBaseWritingDirection(.rightToLeft, range: fullRange)
+        textView.textStorage?.addAttributes(
+            [
+                .paragraphStyle: paragraphStyle,
+                .font: MirookFontRegistrar.vazirmatnRegular(size: 15),
+                .foregroundColor: NSColor.labelColor
+            ],
+            range: fullRange
+        )
+    }
+}
+
+private final class EscapeAwareTextView: NSTextView {
+    var onEscape: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+            return
+        }
+
+        super.keyDown(with: event)
     }
 }
