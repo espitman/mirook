@@ -6,44 +6,91 @@ struct SidebarView: View {
     @AppStorage("defaultModelName") private var defaultModelName = "gpt-5.2"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Mirook")
-                    .font(.title2.weight(.semibold))
-                Text("PDF translation workspace")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Button {
-                openPDF()
-            } label: {
-                Label("Open PDF", systemImage: "doc.badge.plus")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.borderedProminent)
-
-            modelControls
-
-            if documentStore.document != nil {
-                Divider()
-
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Current Document")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(documentStore.displayName)
-                        .font(.headline)
-                        .lineLimit(2)
-                    Text("\(documentStore.pageCount) pages")
+                    Text("Mirook")
+                        .font(.title2.weight(.semibold))
+                    Text("PDF translation workspace")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+
+                Button {
+                    openPDF()
+                } label: {
+                    Label("Open PDF", systemImage: "doc.badge.plus")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+
+                modelControls
+
+                if documentStore.document != nil {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Current Document")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(documentStore.displayName)
+                            .font(.headline)
+                            .lineLimit(2)
+                        Text("\(documentStore.pageCount) pages")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    usageSummary
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            .padding(.top, 44)
+        }
+    }
+
+    @ViewBuilder
+    private var usageSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Usage")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if let projectCost = documentStore.projectCostDescription {
+                Text(projectCost)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let projectTokens = documentStore.projectTokenDescription {
+                    Text(projectTokens)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Project cost will appear after Liara returns it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
+            if let lastCost = documentStore.lastTranslationCostDescription {
+                Divider()
+                    .padding(.vertical, 2)
+
+                Text(lastCost)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let lastTokens = documentStore.lastTranslationTokenDescription {
+                    Text(lastTokens)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
-        .padding(20)
     }
 
     private var modelControls: some View {

@@ -23,6 +23,27 @@ struct AIUsage: Codable, Equatable {
         providerReportedCost != nil
     }
 
+    var hasUsage: Bool {
+        hasTokens || hasProviderReportedCost
+    }
+
+    var tokenDisplayText: String {
+        "\(totalTokens.formatted()) total tokens"
+    }
+
+    var costDisplayText: String? {
+        guard let providerReportedCost else {
+            return nil
+        }
+
+        let cost = providerReportedCost.formatted(.number.precision(.fractionLength(0...6)))
+        if let costCurrency, !costCurrency.isEmpty {
+            return "\(cost) \(costCurrency)"
+        }
+
+        return "\(cost) provider cost"
+    }
+
     var displayText: String {
         var parts = [
             "\(inputTokens.formatted()) input",
@@ -30,13 +51,8 @@ struct AIUsage: Codable, Equatable {
             "\(totalTokens.formatted()) total tokens"
         ]
 
-        if let providerReportedCost {
-            let cost = providerReportedCost.formatted(.number.precision(.fractionLength(0...6)))
-            if let costCurrency, !costCurrency.isEmpty {
-                parts.append("\(cost) \(costCurrency)")
-            } else {
-                parts.append("\(cost) provider cost")
-            }
+        if let costDisplayText {
+            parts.append(costDisplayText)
         } else {
             parts.append("cost not returned")
         }
@@ -67,4 +83,3 @@ struct AIPageTranslationResult {
     let page: TranslatedPage
     let usage: AIUsage?
 }
-

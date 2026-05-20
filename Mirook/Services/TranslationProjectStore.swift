@@ -102,6 +102,20 @@ struct TranslationProjectStore {
         return try decoder.decode(TextPDFExportOptions.self, from: data)
     }
 
+    func recordUsage(_ usage: AIUsage?, projectID: String) throws -> TranslationProjectManifest? {
+        guard let usage, usage.hasUsage else {
+            return nil
+        }
+
+        var manifest = try loadManifest(projectID: projectID)
+        var totalUsage = manifest.totalUsage ?? .zero
+        totalUsage.add(usage)
+        manifest.totalUsage = totalUsage
+        manifest.updatedAt = Date()
+        try saveManifest(manifest)
+        return manifest
+    }
+
     func projectDirectoryURL(projectID: String) throws -> URL {
         let rootURL = try projectsRootURL()
         let url = try existingProjectDirectoryURL(projectID: projectID, rootURL: rootURL) ??
@@ -183,14 +197,19 @@ struct TranslationProjectStore {
         try data.write(to: try manifestURL(projectID: manifest.id), options: .atomic)
     }
 
+    private func loadManifest(projectID: String) throws -> TranslationProjectManifest {
+        let url = try manifestURL(projectID: projectID)
+        let data = try Data(contentsOf: url)
+        return try decoder.decode(TranslationProjectManifest.self, from: data)
+    }
+
     private func touchManifest(projectID: String) throws {
         let url = try manifestURL(projectID: projectID)
         guard fileManager.fileExists(atPath: url.path) else {
             return
         }
 
-        let data = try Data(contentsOf: url)
-        var manifest = try decoder.decode(TranslationProjectManifest.self, from: data)
+        var manifest = try loadManifest(projectID: projectID)
         manifest.updatedAt = Date()
         try saveManifest(manifest)
     }

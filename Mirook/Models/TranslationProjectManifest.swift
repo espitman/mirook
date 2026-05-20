@@ -9,4 +9,5 @@ struct TranslationProjectManifest: Codable {
     var model: String
     var createdAt: Date
     var updatedAt: Date
+    var totalUsage: AIUsage? = nil
 }

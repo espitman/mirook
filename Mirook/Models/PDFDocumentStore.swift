@@ -105,9 +105,32 @@ final class PDFDocumentStore: ObservableObject {
         return "Translating text (\(textTranslationProgressCurrent) of \(textTranslationProgressTotal))"
     }
 
-    var lastTranslationUsageDescription: String? {
+    var lastTranslationCostDescription: String? {
         guard let lastTranslationUsage else { return nil }
-        return "Last usage: \(lastTranslationUsage.displayText)"
+        return "Last run: \(lastTranslationUsage.costDisplayText ?? "cost not returned")"
+    }
+
+    var lastTranslationTokenDescription: String? {
+        guard let lastTranslationUsage, lastTranslationUsage.hasTokens else { return nil }
+        return lastTranslationUsage.tokenDisplayText
+    }
+
+    var projectCostDescription: String? {
+        guard let totalUsage = currentTranslationProject?.totalUsage,
+              totalUsage.hasUsage else {
+            return nil
+        }
+
+        return "Project total: \(totalUsage.costDisplayText ?? "cost not returned")"
+    }
+
+    var projectTokenDescription: String? {
+        guard let totalUsage = currentTranslationProject?.totalUsage,
+              totalUsage.hasTokens else {
+            return nil
+        }
+
+        return totalUsage.tokenDisplayText
     }
 
     var translatedExportPageCount: Int {
@@ -307,6 +330,7 @@ final class PDFDocumentStore: ObservableObject {
             )
             translatedPage = result.page
             lastTranslationUsage = result.usage
+            try recordProjectUsage(result.usage)
             renderTranslatedPreview()
         } catch {
             lastErrorMessage = error.localizedDescription
@@ -604,7 +628,6 @@ final class PDFDocumentStore: ObservableObject {
                     targetLanguage: targetLanguage,
                     model: model
                 )
-                operationUsage.add(translationResult.usage)
                 let translatedTextPage = TranslatedTextPage(
                     pageIndex: pageNumber - 1,
                     sourceText: sourceText,
@@ -612,10 +635,12 @@ final class PDFDocumentStore: ObservableObject {
                     isBlank: false
                 )
                 try cacheTranslatedTextPage(translatedTextPage)
+                operationUsage.add(translationResult.usage)
+                try recordProjectUsage(translationResult.usage)
             }
 
             translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
-            lastTranslationUsage = operationUsage.hasTokens ? operationUsage : nil
+            lastTranslationUsage = operationUsage.hasUsage ? operationUsage : nil
 
             if !blankPageNumbers.isEmpty {
                 lastErrorMessage = "Preserved blank pages: \(formattedPageList(blankPageNumbers))."
@@ -646,6 +671,15 @@ final class PDFDocumentStore: ObservableObject {
         if let currentTranslationProject {
             try translationProjectStore.savePage(page, projectID: currentTranslationProject.id)
         }
+    }
+
+    private func recordProjectUsage(_ usage: AIUsage?) throws {
+        guard let currentTranslationProject,
+              let updatedProject = try translationProjectStore.recordUsage(usage, projectID: currentTranslationProject.id) else {
+            return
+        }
+
+        self.currentTranslationProject = updatedProject
     }
 
     private func makeMockTranslatedPage(for renderedPage: RenderedPage) -> TranslatedPage {

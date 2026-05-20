@@ -140,11 +140,6 @@ struct TranslationInspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                if let usage = documentStore.lastTranslationUsageDescription {
-                    Text(usage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
     }

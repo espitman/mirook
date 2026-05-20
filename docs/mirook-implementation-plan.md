@@ -467,6 +467,7 @@ Tasks:
 - [x] Preserve blank source pages in text PDF export.
 - [x] Persist text translation projects so books can be translated in multiple parts and exported as one complete PDF.
 - [x] Store each book project in a readable folder under `~/Documents/Mirook/Projects`, with migration from the older Application Support location.
+- [x] Persist provider-reported usage and cost totals in each book project manifest.
 
 Deliverable:
 
