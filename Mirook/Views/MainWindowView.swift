@@ -4,19 +4,28 @@ struct MainWindowView: View {
     @EnvironmentObject private var documentStore: PDFDocumentStore
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260)
-        } detail: {
-            HSplitView {
-                ReaderView()
-                    .frame(minWidth: 560)
+                .frame(width: 280)
+                .background(MirookTheme.sidebarBackground)
 
-                TranslationInspectorView()
-                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
-            }
+            Rectangle()
+                .fill(MirookTheme.separator)
+                .frame(width: 1)
+
+            ReaderView()
+                .frame(minWidth: 560)
+
+            Rectangle()
+                .fill(MirookTheme.separator)
+                .frame(width: 1)
+
+            TranslationInspectorView()
+                .frame(width: 360)
         }
-        .frame(minWidth: 980, minHeight: 640)
+        .background(MirookTheme.appBackground)
+        .preferredColorScheme(.light)
+        .frame(minWidth: 1120, minHeight: 720)
         .alert("Unable to Open PDF", isPresented: errorBinding) {
             Button("OK", role: .cancel) {
                 documentStore.lastErrorMessage = nil

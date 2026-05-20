@@ -8,6 +8,7 @@ struct TranslationInspectorView: View {
     @AppStorage("textPDFLineSpacing") private var textPDFLineSpacing = TextPDFExportOptions.default.lineSpacing
     @AppStorage("textPDFParagraphSpacing") private var textPDFParagraphSpacing = TextPDFExportOptions.default.paragraphSpacing
     @AppStorage("textPDFMargin") private var textPDFMargin = TextPDFExportOptions.default.margin
+    @AppStorage("translatedTextPreviewFontSize") private var translatedTextPreviewFontSize = 18.0
     @State private var showsTextPDFStyleControls = false
     @State private var showsAdvancedLayoutTools = false
 
@@ -16,6 +17,7 @@ struct TranslationInspectorView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Translation")
                     .font(.title3.weight(.semibold))
+                    .foregroundStyle(MirookTheme.ink)
 
                 pageRangeControls
                 translationControls
@@ -23,9 +25,12 @@ struct TranslationInspectorView: View {
                 exportControls
                 advancedLayoutTools
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            .padding(.top, 44)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .scrollContentBackground(.hidden)
+        .background(MirookTheme.panelBackground)
     }
 
     private var selectedStartPage: Binding<Int> {
@@ -54,10 +59,18 @@ struct TranslationInspectorView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
 
             TextField(title, value: value, format: .number)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(MirookTheme.controlFill)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(MirookTheme.border, lineWidth: 1)
+                }
                 .frame(width: 76)
         }
     }
@@ -77,10 +90,11 @@ struct TranslationInspectorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Pages")
                 .font(.headline)
+                .foregroundStyle(MirookTheme.ink)
 
             if documentStore.document == nil {
                 Text("Open a PDF to choose pages.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
             } else {
                 HStack(spacing: 10) {
                     pageNumberField("From", value: selectedStartPage)
@@ -92,21 +106,23 @@ struct TranslationInspectorView: View {
                     Button("Current") {
                         documentStore.selectCurrentPage()
                     }
+                    .buttonStyle(MirookSecondaryButtonStyle())
 
                     Button("All") {
                         documentStore.selectAllPages()
                     }
+                    .buttonStyle(MirookSecondaryButtonStyle())
 
                     Spacer()
 
                     Text("\(documentStore.selectedPageCount) selected")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MirookTheme.mutedInk)
                 }
-                .buttonStyle(.bordered)
                 .disabled(documentStore.isTranslatingTextPage)
             }
         }
+        .mirookPanel(padding: 14)
     }
 
     @ViewBuilder
@@ -115,6 +131,7 @@ struct TranslationInspectorView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Translate")
                     .font(.headline)
+                    .foregroundStyle(MirookTheme.ink)
 
                 Button {
                     Task {
@@ -124,23 +141,24 @@ struct TranslationInspectorView: View {
                     Label("Translate Selection", systemImage: "text.alignright")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(MirookPrimaryButtonStyle())
                 .disabled(
                     documentStore.isTranslatingTextPage ||
                     documentStore.selectedPageCount == 0 ||
                     documentStore.selectedMissingTextPageCount == 0
                 )
 
-                HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(documentStore.translatedTextCoverageDescription)
                     if documentStore.selectedMissingTextPageCount > 0 {
                         Text("\(documentStore.selectedMissingTextPageCount) selected missing")
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
 
             }
+            .mirookPanel(padding: 14)
         }
     }
 
@@ -151,12 +169,13 @@ struct TranslationInspectorView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Rendering page...")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
             }
         } else if let renderedPage = documentStore.renderedPage {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Rendered Page")
                     .font(.headline)
+                    .foregroundStyle(MirookTheme.ink)
 
                 if let image = renderedPage.image {
                     Image(nsImage: image)
@@ -166,7 +185,7 @@ struct TranslationInspectorView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay {
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(.separator, lineWidth: 1)
+                                .stroke(MirookTheme.border, lineWidth: 1)
                         }
                 }
 
@@ -176,7 +195,7 @@ struct TranslationInspectorView: View {
                     Text(renderedPage.imageData.count.formatted(.byteCount(style: .file)))
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
             }
         }
     }
@@ -188,16 +207,17 @@ struct TranslationInspectorView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Translating page...")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
             }
         } else if let translatedPage = documentStore.translatedPage {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Translated Blocks")
                     .font(.headline)
+                    .foregroundStyle(MirookTheme.ink)
 
                 Text("\(translatedPage.blocks.count) blocks detected")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
 
                 ForEach(translatedPage.blocks.prefix(8)) { block in
                     VStack(alignment: .leading, spacing: 5) {
@@ -208,13 +228,13 @@ struct TranslationInspectorView: View {
                             if let confidence = block.confidence {
                                 Text(confidence.formatted(.percent.precision(.fractionLength(0))))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(MirookTheme.mutedInk)
                             }
                         }
 
                         Text(block.sourceText)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MirookTheme.mutedInk)
                             .lineLimit(2)
 
                         Text(block.translatedText)
@@ -222,7 +242,7 @@ struct TranslationInspectorView: View {
                             .lineLimit(3)
                     }
                     .padding(10)
-                    .background(Color(nsColor: .textBackgroundColor))
+                    .background(MirookTheme.paperBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
@@ -236,8 +256,8 @@ struct TranslationInspectorView: View {
                 HStack {
                     ProgressView()
                         .controlSize(.small)
-                    Text(documentStore.textTranslationProgressDescription)
-                        .foregroundStyle(.secondary)
+                Text(documentStore.textTranslationProgressDescription)
+                        .foregroundStyle(MirookTheme.mutedInk)
                 }
 
                 if documentStore.textTranslationProgressTotal > 1 {
@@ -249,28 +269,68 @@ struct TranslationInspectorView: View {
             }
         } else if let translatedTextPage = documentStore.translatedTextPage {
             VStack(alignment: .leading, spacing: 10) {
-                Text(translatedTextPage.isBlank ? "Blank Page" : "Translated Text")
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Text(translatedTextPage.isBlank ? "Blank Page" : "Translated Text")
+                        .font(.headline)
+                        .foregroundStyle(MirookTheme.ink)
+
+                    Spacer()
+
+                    if !translatedTextPage.isBlank {
+                        textPreviewFontControls
+                    }
+                }
 
                 if translatedTextPage.isBlank {
                     Text("This page has no extractable text and will be exported as a blank page.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MirookTheme.mutedInk)
                 } else {
-                    RTLSelectableTextView(text: translatedTextPage.translatedText)
+                    RTLSelectableTextView(
+                        text: translatedTextPage.translatedText,
+                        fontSize: CGFloat(translatedTextPreviewFontSize)
+                    )
                         .frame(minHeight: 180, idealHeight: 260, maxHeight: 360)
-                        .background(Color(nsColor: .textBackgroundColor))
+                        .background(MirookTheme.paperBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay {
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(.separator, lineWidth: 1)
+                                .stroke(MirookTheme.border, lineWidth: 1)
                         }
                 }
 
                 Text("Page \(translatedTextPage.pageNumber)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
             }
+            .mirookPanel(padding: 14)
+        }
+    }
+
+    private var textPreviewFontControls: some View {
+        HStack(spacing: 6) {
+            Button {
+                translatedTextPreviewFontSize = max(12, translatedTextPreviewFontSize - 1)
+            } label: {
+                Image(systemName: "minus")
+            }
+            .buttonStyle(MirookIconButtonStyle())
+            .disabled(translatedTextPreviewFontSize <= 12)
+            .help("Smaller translated text")
+
+            Text("\(Int(translatedTextPreviewFontSize))")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(MirookTheme.mutedInk)
+                .frame(minWidth: 24)
+
+            Button {
+                translatedTextPreviewFontSize = min(30, translatedTextPreviewFontSize + 1)
+            } label: {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(MirookIconButtonStyle())
+            .disabled(translatedTextPreviewFontSize >= 30)
+            .help("Larger translated text")
         }
     }
 
@@ -281,17 +341,18 @@ struct TranslationInspectorView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Building translated preview...")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
             }
         } else if let translatedRenderedPage = documentStore.translatedRenderedPage {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Translated Page Preview")
                     .font(.headline)
+                    .foregroundStyle(MirookTheme.ink)
 
                 if documentStore.translatedPage?.blocks.first?.id.hasPrefix("mock_") == true {
-                    Text("Mock preview uses local PDF text bounds. Real translation requires OpenAI output.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        Text("Mock preview uses local PDF text bounds. Real translation requires OpenAI output.")
+                            .font(.caption)
+                            .foregroundStyle(MirookTheme.mutedInk)
                 }
 
                 if let image = translatedRenderedPage.image {
@@ -302,7 +363,7 @@ struct TranslationInspectorView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay {
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(.separator, lineWidth: 1)
+                                .stroke(MirookTheme.border, lineWidth: 1)
                         }
                 }
 
@@ -313,7 +374,7 @@ struct TranslationInspectorView: View {
                     Text(translatedRenderedPage.imageData.count.formatted(.byteCount(style: .file)))
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
             }
         }
     }
@@ -321,17 +382,17 @@ struct TranslationInspectorView: View {
     @ViewBuilder
     private var exportControls: some View {
         if documentStore.document != nil {
-            Divider()
-
             VStack(alignment: .leading, spacing: 10) {
                 Text("Export")
                     .font(.headline)
+                    .foregroundStyle(MirookTheme.ink)
 
                 DisclosureGroup(isExpanded: $showsTextPDFStyleControls) {
                     textPDFStyleControls
                         .padding(.top, 6)
                 } label: {
                     Label("PDF Style", systemImage: "textformat.size")
+                        .foregroundStyle(MirookTheme.ink)
                 }
 
                 Button {
@@ -340,7 +401,7 @@ struct TranslationInspectorView: View {
                     Label("Export Complete Book", systemImage: "books.vertical")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(MirookPrimaryButtonStyle())
                 .disabled(!documentStore.canExportCompleteTextBook || documentStore.isExportingTextPDF)
 
                 Button {
@@ -349,26 +410,27 @@ struct TranslationInspectorView: View {
                     Label("Export Ready Pages", systemImage: "doc.plaintext")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(MirookSecondaryButtonStyle())
                 .disabled(documentStore.translatedTextExportPageCount == 0 || documentStore.isExportingTextPDF)
 
-                HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(documentStore.translatedTextCoverageDescription)
                     if let url = documentStore.lastExportedTextPDFURL {
                         Text("Saved: \(url.lastPathComponent)")
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
 
                 if let projectPath = documentStore.currentTranslationProjectPath {
                     Text("Project: \(projectPath)")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MirookTheme.mutedInk)
                         .lineLimit(2)
                         .textSelection(.enabled)
                 }
             }
+            .mirookPanel(padding: 14)
         }
     }
 
@@ -383,7 +445,7 @@ struct TranslationInspectorView: View {
                         Label("Render Page Image", systemImage: "photo")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MirookSecondaryButtonStyle())
                     .disabled(documentStore.isRenderingPage)
 
                     renderPreview
@@ -396,7 +458,7 @@ struct TranslationInspectorView: View {
                         Label("Translate Layout Page", systemImage: "wand.and.stars")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MirookSecondaryButtonStyle())
                     .disabled(documentStore.isTranslatingPage)
 
                     translationPreview
@@ -407,7 +469,7 @@ struct TranslationInspectorView: View {
                         Label("Build Layout Preview", systemImage: "doc.viewfinder")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MirookSecondaryButtonStyle())
                     .disabled(documentStore.isRenderingTranslatedPage)
 
                     translatedPagePreview
@@ -418,23 +480,25 @@ struct TranslationInspectorView: View {
                         Label("Export Layout PDF", systemImage: "square.and.arrow.down")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MirookSecondaryButtonStyle())
                     .disabled(documentStore.translatedExportPageCount == 0 || documentStore.isExportingPDF)
 
-                    HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("\(documentStore.translatedExportPageCount) layout pages ready")
                         if let url = documentStore.lastExportedPDFURL {
                             Text("Saved: \(url.lastPathComponent)")
                         }
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
                 }
                 .padding(.top, 8)
             } label: {
                 Label("Advanced Layout Tools", systemImage: "slider.horizontal.3")
+                    .foregroundStyle(MirookTheme.ink)
             }
             .font(.body)
+            .mirookPanel(padding: 14)
         }
     }
 
@@ -456,6 +520,11 @@ struct TranslationInspectorView: View {
 
 private struct RTLSelectableTextView: NSViewRepresentable {
     let text: String
+    let fontSize: CGFloat
+
+    private static func persianBodyFont(size: CGFloat) -> NSFont {
+        MirookFontRegistrar.vazirmatnRegular(size: size)
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -468,7 +537,7 @@ private struct RTLSelectableTextView: NSViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.font = .preferredFont(forTextStyle: .body)
+        textView.font = Self.persianBodyFont(size: fontSize)
         textView.textColor = .labelColor
         textView.alignment = .right
         textView.baseWritingDirection = .rightToLeft
@@ -492,6 +561,7 @@ private struct RTLSelectableTextView: NSViewRepresentable {
             textView.string = text
         }
 
+        textView.font = Self.persianBodyFont(size: fontSize)
         textView.alignment = .right
         textView.baseWritingDirection = .rightToLeft
         textView.setBaseWritingDirection(.rightToLeft, range: NSRange(location: 0, length: textView.string.utf16.count))

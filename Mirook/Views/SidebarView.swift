@@ -8,38 +8,46 @@ struct SidebarView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Mirook")
-                        .font(.title2.weight(.semibold))
-                    Text("PDF translation workspace")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image("MirookLogoMark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 44, height: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mirook")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(MirookTheme.ink)
+                        Text("PDF translation workspace")
+                            .font(.caption)
+                            .foregroundStyle(MirookTheme.mutedInk)
+                    }
                 }
 
                 Button {
                     openPDF()
                 } label: {
-                    Label("Open PDF", systemImage: "doc.badge.plus")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Label("Open PDF", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(MirookPrimaryButtonStyle())
 
                 modelControls
 
                 if documentStore.document != nil {
-                    Divider()
-
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Current Document")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MirookTheme.mutedInk)
                         Text(documentStore.displayName)
                             .font(.headline)
+                            .foregroundStyle(MirookTheme.ink)
                             .lineLimit(2)
                         Text("\(documentStore.pageCount) pages")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MirookTheme.mutedInk)
                     }
+                    .mirookPanel()
 
                     usageSummary
                 }
@@ -47,8 +55,9 @@ struct SidebarView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
-            .padding(.top, 44)
+            .padding(.top, 22)
         }
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -56,22 +65,23 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Usage")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
 
             if let projectCost = documentStore.projectCostDescription {
                 Text(projectCost)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(MirookTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let projectTokens = documentStore.projectTokenDescription {
                     Text(projectTokens)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MirookTheme.mutedInk)
                 }
             } else {
                 Text("Project cost will appear after Liara returns it.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -81,23 +91,24 @@ struct SidebarView: View {
 
                 Text(lastCost)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let lastTokens = documentStore.lastTranslationTokenDescription {
                     Text(lastTokens)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MirookTheme.mutedInk)
                 }
             }
         }
+        .mirookPanel()
     }
 
     private var modelControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("AI Model")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MirookTheme.mutedInk)
 
             HStack(spacing: 8) {
                 Picker("AI Model", selection: $defaultModelName) {
@@ -126,7 +137,7 @@ struct SidebarView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(MirookIconButtonStyle())
                 .disabled(documentStore.isLoadingAIModels)
                 .help("Load models from the configured AI provider")
             }
@@ -134,10 +145,11 @@ struct SidebarView: View {
             if documentStore.availableAIModels.isEmpty {
                 Text("Refresh to load models from Liara or the configured provider.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MirookTheme.mutedInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .mirookPanel()
     }
 
     private func openPDF() {

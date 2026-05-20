@@ -20,6 +20,7 @@
 		489DDB787B78112892B018A8 /* Vazirmatn-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = B7A6589A0ED2FABCD3F8FEC3 /* Vazirmatn-OFL.txt */; };
 		4CAD865CAFD7706BA7F7BFA2 /* AIUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C07D0CC8B8CF16EC3159CE4 /* AIUsage.swift */; };
 		5777BBC77CE792A1961DEE85 /* AIModelInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEB462EEBD0F6FB92878928 /* AIModelInfo.swift */; };
+		75F8CDD58DE1CB9DBEC8C567 /* MirookTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D978F50A4FB2D4C23C4B61C /* MirookTheme.swift */; };
 		8C3864924C5D820BA7460BCF /* Vazirmatn-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E052837188A7F7E8EB65327C /* Vazirmatn-Bold.ttf */; };
 		A723A0183D1C6130F3EE737A /* TranslationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659F0594572BE283DF58BBA9 /* TranslationModels.swift */; };
 		B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */; };
@@ -52,6 +53,7 @@
 		659F0594572BE283DF58BBA9 /* TranslationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationModels.swift; sourceTree = "<group>"; };
 		726EC6286C625CA612D58DDF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		765E5EF13D1F45C5EB718690 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		7D978F50A4FB2D4C23C4B61C /* MirookTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MirookTheme.swift; sourceTree = "<group>"; };
 		83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedPageRenderer.swift; sourceTree = "<group>"; };
 		85D9C58CBAAC8D1E4C2EE5AD /* TranslatedTextPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedTextPage.swift; sourceTree = "<group>"; };
 		86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyReaderState.swift; sourceTree = "<group>"; };
@@ -94,6 +96,7 @@
 			children = (
 				86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */,
 				765E5EF13D1F45C5EB718690 /* MainWindowView.swift */,
+				7D978F50A4FB2D4C23C4B61C /* MirookTheme.swift */,
 				D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */,
 				E4A318F86014A8807A2C59C5 /* ReaderView.swift */,
 				314D55FFA5D93E87E4DD9F37 /* SettingsView.swift */,
@@ -242,6 +245,7 @@
 				B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */,
 				B41271B3DC00D229636CF296 /* KeychainService.swift in Sources */,
 				D768F965987410281BDB816B /* MainWindowView.swift in Sources */,
+				75F8CDD58DE1CB9DBEC8C567 /* MirookTheme.swift in Sources */,
 				B442FC08B63B5C4DADF99CEB /* MirookApp.swift in Sources */,
 				CD36549DBC51132042765A45 /* OpenAIClient.swift in Sources */,
 				2B11B001D31BA028DAF79CF9 /* PDFDocumentStore.swift in Sources */,

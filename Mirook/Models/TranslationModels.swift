@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 struct TranslatedPage: Codable {
@@ -15,11 +16,17 @@ struct TranslatedTextBlock: Codable, Identifiable {
     let confidence: Double?
 }
 
-struct BoundingBox: Codable {
+struct BoundingBox: Codable, Equatable {
     let x: Double
     let y: Double
     let width: Double
     let height: Double
+}
+
+extension BoundingBox {
+    var cgRect: CGRect {
+        CGRect(x: x, y: y, width: width, height: height)
+    }
 }
 
 enum TextRole: String, Codable, CaseIterable {
