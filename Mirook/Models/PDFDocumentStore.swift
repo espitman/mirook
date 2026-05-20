@@ -162,6 +162,18 @@ final class PDFDocumentStore: ObservableObject {
         return "\(translatedTextExportPageCount) / \(pageCount) pages ready, \(translatedCount) translated, \(translatedTextBlankPageCount) blank, \(translatedTextMissingPageCount) missing"
     }
 
+    var lastTranslatedTextPageNumber: Int? {
+        translatedTextPagesByIndex
+            .filter { !$0.value.isBlank }
+            .map(\.key)
+            .max()
+            .map { $0 + 1 }
+    }
+
+    var canGoToLastTranslatedTextPage: Bool {
+        lastTranslatedTextPageNumber != nil
+    }
+
     var canExportCompleteTextBook: Bool {
         pageCount > 0 && translatedTextMissingPageCount == 0
     }
@@ -247,6 +259,11 @@ final class PDFDocumentStore: ObservableObject {
         translatedPage = nil
         translatedRenderedPage = nil
         translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
+    }
+
+    func goToLastTranslatedTextPage() {
+        guard let pageNumber = lastTranslatedTextPageNumber else { return }
+        goToPage(number: pageNumber)
     }
 
     func setPageSelection(startPage: Int, endPage: Int) {
@@ -649,11 +666,7 @@ final class PDFDocumentStore: ObservableObject {
             translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
             lastTranslationUsage = operationUsage.hasUsage ? operationUsage : nil
 
-            if !blankPageNumbers.isEmpty {
-                lastErrorMessage = "Preserved blank pages: \(formattedPageList(blankPageNumbers))."
-            } else {
-                lastErrorMessage = nil
-            }
+            lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription
         }

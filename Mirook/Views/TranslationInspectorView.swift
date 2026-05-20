@@ -113,6 +113,18 @@ struct TranslationInspectorView: View {
                     }
                     .buttonStyle(MirookSecondaryButtonStyle())
 
+                    Button {
+                        documentStore.goToLastTranslatedTextPage()
+                    } label: {
+                        Image(systemName: "checkmark.rectangle.stack")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(MirookSecondaryButtonStyle())
+                    .disabled(!documentStore.canGoToLastTranslatedTextPage)
+                    .help("Go to last translated page")
+                    .accessibilityLabel("Last translated page")
+
                     Spacer()
 
                     Text("\(documentStore.selectedPageCount) selected")
