@@ -1,7 +1,15 @@
+import AppKit
 import SwiftUI
 
 struct TranslationInspectorView: View {
     @EnvironmentObject private var documentStore: PDFDocumentStore
+    @AppStorage("textPDFExportFont") private var textPDFExportFont = TextPDFExportFont.vazirmatn.rawValue
+    @AppStorage("textPDFBodyFontSize") private var textPDFBodyFontSize = TextPDFExportOptions.default.bodyFontSize
+    @AppStorage("textPDFLineSpacing") private var textPDFLineSpacing = TextPDFExportOptions.default.lineSpacing
+    @AppStorage("textPDFParagraphSpacing") private var textPDFParagraphSpacing = TextPDFExportOptions.default.paragraphSpacing
+    @AppStorage("textPDFMargin") private var textPDFMargin = TextPDFExportOptions.default.margin
+    @State private var showsTextPDFStyleControls = false
+    @State private var showsAdvancedLayoutTools = false
 
     var body: some View {
         ScrollView {
@@ -9,123 +17,11 @@ struct TranslationInspectorView: View {
                 Text("Translation")
                     .font(.title3.weight(.semibold))
 
-                VStack(alignment: .leading, spacing: 12) {
-                    LabeledContent("Source") {
-                        Text("Auto")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    LabeledContent("Target") {
-                        Text("Persian")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    LabeledContent("Layout") {
-                        Text("Mirror")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Page Range")
-                        .font(.headline)
-
-                    if documentStore.document == nil {
-                        Text("Open a PDF to choose pages.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        HStack(spacing: 10) {
-                            pageNumberField("From", value: selectedStartPage)
-                            pageNumberField("To", value: selectedEndPage)
-                        }
-                        .disabled(documentStore.isTranslatingTextPage)
-
-                        HStack(spacing: 8) {
-                            Button("Current") {
-                                documentStore.selectCurrentPage()
-                            }
-
-                            Button("All") {
-                                documentStore.selectAllPages()
-                            }
-
-                            Spacer()
-
-                            Text("\(documentStore.selectedPageCount) selected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(documentStore.isTranslatingTextPage)
-                    }
-                }
-
-                Button {
-                    documentStore.renderCurrentPage()
-                } label: {
-                    Label("Render Current Page", systemImage: "photo")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(documentStore.document == nil || documentStore.isRenderingPage)
-
-                renderPreview
-
-                Button {
-                    Task {
-                        await documentStore.translateCurrentPage()
-                    }
-                } label: {
-                    Label("Translate Current Page", systemImage: "wand.and.stars")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(documentStore.document == nil || documentStore.isTranslatingPage)
-
-                translationPreview
-
-                Button {
-                    Task {
-                        await documentStore.translateCurrentPageAsText()
-                    }
-                } label: {
-                    Label("Translate Current Page Text", systemImage: "text.alignright")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(documentStore.document == nil || documentStore.isTranslatingTextPage)
-
-                Button {
-                    Task {
-                        await documentStore.translateSelectedPagesAsText()
-                    }
-                } label: {
-                    Label("Translate Selected Text Pages", systemImage: "doc.text")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(
-                    documentStore.document == nil ||
-                    documentStore.isTranslatingTextPage ||
-                    documentStore.selectedPageCount == 0
-                )
-
+                pageRangeControls
+                translationControls
                 textTranslationPreview
-
-                Button {
-                    documentStore.renderTranslatedPreview()
-                } label: {
-                    Label(documentStore.translatedPage == nil ? "Build Mock Layout Preview" : "Build Translated Preview", systemImage: "doc.viewfinder")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(documentStore.document == nil || documentStore.isRenderingTranslatedPage)
-
-                translatedPagePreview
-
                 exportControls
+                advancedLayoutTools
             }
             .padding(20)
         }
@@ -163,6 +59,93 @@ struct TranslationInspectorView: View {
             TextField(title, value: value, format: .number)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 76)
+        }
+    }
+
+    private var textPDFExportOptions: TextPDFExportOptions {
+        TextPDFExportOptions(
+            font: TextPDFExportFont(rawValue: textPDFExportFont) ?? .vazirmatn,
+            bodyFontSize: textPDFBodyFontSize,
+            lineSpacing: textPDFLineSpacing,
+            paragraphSpacing: textPDFParagraphSpacing,
+            margin: textPDFMargin
+        )
+    }
+
+    @ViewBuilder
+    private var pageRangeControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Pages")
+                .font(.headline)
+
+            if documentStore.document == nil {
+                Text("Open a PDF to choose pages.")
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 10) {
+                    pageNumberField("From", value: selectedStartPage)
+                    pageNumberField("To", value: selectedEndPage)
+                }
+                .disabled(documentStore.isTranslatingTextPage)
+
+                HStack(spacing: 8) {
+                    Button("Current") {
+                        documentStore.selectCurrentPage()
+                    }
+
+                    Button("All") {
+                        documentStore.selectAllPages()
+                    }
+
+                    Spacer()
+
+                    Text("\(documentStore.selectedPageCount) selected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.bordered)
+                .disabled(documentStore.isTranslatingTextPage)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var translationControls: some View {
+        if documentStore.document != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Translate")
+                    .font(.headline)
+
+                Button {
+                    Task {
+                        await documentStore.translateMissingSelectedPagesAsText()
+                    }
+                } label: {
+                    Label("Translate Selection", systemImage: "text.alignright")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    documentStore.isTranslatingTextPage ||
+                    documentStore.selectedPageCount == 0 ||
+                    documentStore.selectedMissingTextPageCount == 0
+                )
+
+                HStack(spacing: 6) {
+                    Text(documentStore.translatedTextCoverageDescription)
+                    if documentStore.selectedMissingTextPageCount > 0 {
+                        Text("\(documentStore.selectedMissingTextPageCount) selected missing")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let usage = documentStore.lastTranslationUsageDescription {
+                    Text(usage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -271,17 +254,23 @@ struct TranslationInspectorView: View {
             }
         } else if let translatedTextPage = documentStore.translatedTextPage {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Translated Text")
+                Text(translatedTextPage.isBlank ? "Blank Page" : "Translated Text")
                     .font(.headline)
 
-                Text(translatedTextPage.translatedText)
-                    .font(.body)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(10)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(10)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                if translatedTextPage.isBlank {
+                    Text("This page has no extractable text and will be exported as a blank page.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    RTLSelectableTextView(text: translatedTextPage.translatedText)
+                        .frame(minHeight: 180, idealHeight: 260, maxHeight: 360)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.separator, lineWidth: 1)
+                        }
+                }
 
                 Text("Page \(translatedTextPage.pageNumber)")
                     .font(.caption)
@@ -343,42 +332,173 @@ struct TranslationInspectorView: View {
                 Text("Export")
                     .font(.headline)
 
-                Button {
-                    documentStore.exportTranslatedPDF()
+                DisclosureGroup(isExpanded: $showsTextPDFStyleControls) {
+                    textPDFStyleControls
+                        .padding(.top, 6)
                 } label: {
-                    Label("Export Translated PDF", systemImage: "square.and.arrow.down")
+                    Label("PDF Style", systemImage: "textformat.size")
+                }
+
+                Button {
+                    documentStore.exportCompleteTextBook(options: textPDFExportOptions)
+                } label: {
+                    Label("Export Complete Book", systemImage: "books.vertical")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(documentStore.translatedExportPageCount == 0 || documentStore.isExportingPDF)
+                .disabled(!documentStore.canExportCompleteTextBook || documentStore.isExportingTextPDF)
 
                 Button {
-                    documentStore.exportTextTranslatedPDF()
+                    documentStore.exportTextTranslatedPDF(options: textPDFExportOptions)
                 } label: {
-                    Label("Export Text PDF", systemImage: "doc.plaintext")
+                    Label("Export Ready Pages", systemImage: "doc.plaintext")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .disabled(documentStore.translatedTextExportPageCount == 0 || documentStore.isExportingTextPDF)
 
                 HStack(spacing: 6) {
-                    Text("\(documentStore.translatedExportPageCount) pages ready")
-                    if let url = documentStore.lastExportedPDFURL {
-                        Text("Saved: \(url.lastPathComponent)")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                HStack(spacing: 6) {
-                    Text("\(documentStore.translatedTextExportPageCount) text pages ready")
+                    Text(documentStore.translatedTextCoverageDescription)
                     if let url = documentStore.lastExportedTextPDFURL {
                         Text("Saved: \(url.lastPathComponent)")
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                if let projectPath = documentStore.currentTranslationProjectPath {
+                    Text("Project: \(projectPath)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private var advancedLayoutTools: some View {
+        if documentStore.document != nil {
+            DisclosureGroup(isExpanded: $showsAdvancedLayoutTools) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Button {
+                        documentStore.renderCurrentPage()
+                    } label: {
+                        Label("Render Page Image", systemImage: "photo")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(documentStore.isRenderingPage)
+
+                    renderPreview
+
+                    Button {
+                        Task {
+                            await documentStore.translateCurrentPage()
+                        }
+                    } label: {
+                        Label("Translate Layout Page", systemImage: "wand.and.stars")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(documentStore.isTranslatingPage)
+
+                    translationPreview
+
+                    Button {
+                        documentStore.renderTranslatedPreview()
+                    } label: {
+                        Label("Build Layout Preview", systemImage: "doc.viewfinder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(documentStore.isRenderingTranslatedPage)
+
+                    translatedPagePreview
+
+                    Button {
+                        documentStore.exportTranslatedPDF()
+                    } label: {
+                        Label("Export Layout PDF", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(documentStore.translatedExportPageCount == 0 || documentStore.isExportingPDF)
+
+                    HStack(spacing: 6) {
+                        Text("\(documentStore.translatedExportPageCount) layout pages ready")
+                        if let url = documentStore.lastExportedPDFURL {
+                            Text("Saved: \(url.lastPathComponent)")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("Advanced Layout Tools", systemImage: "slider.horizontal.3")
+            }
+            .font(.body)
+        }
+    }
+
+    private var textPDFStyleControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Font", selection: $textPDFExportFont) {
+                ForEach(TextPDFExportFont.allCases) { exportFont in
+                    Text(exportFont.displayName).tag(exportFont.rawValue)
+                }
+            }
+
+            Stepper("Size \(Int(textPDFBodyFontSize))", value: $textPDFBodyFontSize, in: 11...24, step: 1)
+            Stepper("Line spacing \(Int(textPDFLineSpacing))", value: $textPDFLineSpacing, in: 2...14, step: 1)
+            Stepper("Paragraph spacing \(Int(textPDFParagraphSpacing))", value: $textPDFParagraphSpacing, in: 6...28, step: 1)
+            Stepper("Margin \(Int(textPDFMargin))", value: $textPDFMargin, in: 36...90, step: 2)
+        }
+    }
+}
+
+private struct RTLSelectableTextView: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.textColor = .labelColor
+        textView.alignment = .right
+        textView.baseWritingDirection = .rightToLeft
+        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else {
+            return
+        }
+
+        if textView.string != text {
+            textView.string = text
+        }
+
+        textView.alignment = .right
+        textView.baseWritingDirection = .rightToLeft
+        textView.setBaseWritingDirection(.rightToLeft, range: NSRange(location: 0, length: textView.string.utf16.count))
     }
 }

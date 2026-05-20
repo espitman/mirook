@@ -422,6 +422,8 @@ Tasks:
 - [x] Handle Structured Output refusals and invalid responses.
 - [x] Add retry behavior for transient network and rate-limit errors.
 - [x] Display detected translated blocks in a debug panel.
+- [x] Load selectable AI models from the configured OpenAI-compatible provider.
+- [x] Show provider token usage after translation and surface provider-reported cost when present.
 
 Deliverable:
 
@@ -460,11 +462,15 @@ Tasks:
 - [x] Export final PDF.
 - [x] Add text-first PDF export for readable book-style output.
 - [x] Translate selected page ranges through the text-first pipeline.
+- [x] Add editable text PDF style controls and bundled Vazirmatn font.
+- [x] Preserve blank source pages in text PDF export.
+- [x] Persist text translation projects so books can be translated in multiple parts and exported as one complete PDF.
 
 Deliverable:
 
 - [x] User can export selected translated pages as one continuous PDF.
 - [x] User can export translated extractable text as a reflowed Persian PDF without rasterizing the original page.
+- [x] User can reopen the same source PDF, continue missing page translations, and export a complete book when every page is ready.
 
 ---
 

@@ -59,7 +59,7 @@ struct OpenAIClient {
         renderedPage: RenderedPage,
         targetLanguage: String,
         model: String
-    ) async throws -> TranslatedPage {
+    ) async throws -> AIPageTranslationResult {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OpenAIClientError.missingAPIKey
         }
@@ -96,7 +96,7 @@ struct OpenAIClient {
         _ text: String,
         targetLanguage: String,
         model: String
-    ) async throws -> String {
+    ) async throws -> AITextTranslationResult {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OpenAIClientError.missingAPIKey
         }
@@ -138,7 +138,38 @@ struct OpenAIClient {
         throw OpenAIClientError.invalidResponse
     }
 
-    private func performTranslationRequest(request: URLRequest) async throws -> TranslatedPage {
+    func listModels() async throws -> [AIModelInfo] {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw OpenAIClientError.missingAPIKey
+        }
+
+        guard let url = endpointURL(path: "/models") else {
+            throw OpenAIClientError.invalidBaseURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await urlSession.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIClientError.invalidResponse
+        }
+
+        if !(200..<300).contains(httpResponse.statusCode) {
+            let errorResponse = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data)
+            let message = errorResponse?.error.message ?? "AI provider returned HTTP \(httpResponse.statusCode)."
+            throw OpenAIClientError.apiError(message)
+        }
+
+        let responsePayload = try JSONDecoder().decode(ModelListResponse.self, from: data)
+        let uniqueIDs = Set(responsePayload.data.map(\.id))
+        return uniqueIDs
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .map { AIModelInfo(id: $0) }
+    }
+
+    private func performTranslationRequest(request: URLRequest) async throws -> AIPageTranslationResult {
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAIClientError.invalidResponse
@@ -153,7 +184,8 @@ struct OpenAIClient {
             throw OpenAIClientError.apiError(message)
         }
 
-        guard let outputText = try outputText(from: data) else {
+        let output = try outputResult(from: data)
+        guard let outputText = output.text else {
             throw OpenAIClientError.missingOutputText
         }
 
@@ -165,10 +197,10 @@ struct OpenAIClient {
             throw OpenAIClientError.invalidTranslationJSON
         }
 
-        return translatedPage
+        return AIPageTranslationResult(page: translatedPage, usage: output.usage)
     }
 
-    private func performTextRequest(request: URLRequest) async throws -> String {
+    private func performTextRequest(request: URLRequest) async throws -> AITextTranslationResult {
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAIClientError.invalidResponse
@@ -183,12 +215,13 @@ struct OpenAIClient {
             throw OpenAIClientError.apiError(message)
         }
 
-        guard let outputText = try outputText(from: data)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        let output = try outputResult(from: data)
+        guard let outputText = output.text?.trimmingCharacters(in: .whitespacesAndNewlines),
               !outputText.isEmpty else {
             throw OpenAIClientError.missingOutputText
         }
 
-        return outputText
+        return AITextTranslationResult(text: outputText, usage: output.usage)
     }
 
     private func makeRequest(
@@ -494,21 +527,141 @@ struct OpenAIClient {
         return URL(string: normalized + path)
     }
 
-    private func outputText(from data: Data) throws -> String? {
+    private func outputResult(from data: Data) throws -> AIOutputResult {
         switch apiStyle {
         case .responses:
             let responsePayload = try JSONDecoder().decode(OpenAIResponse.self, from: data)
             if let refusal = responsePayload.refusalText {
                 throw OpenAIClientError.refusal(refusal)
             }
-            return responsePayload.outputText
+            return AIOutputResult(
+                text: responsePayload.outputText,
+                usage: responsePayload.usage?.aiUsage(cost: providerReportedCost(from: data))
+            )
         case .chatCompletions:
             let responsePayload = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
             if let refusal = responsePayload.refusalText {
                 throw OpenAIClientError.refusal(refusal)
             }
-            return responsePayload.outputText
+            return AIOutputResult(
+                text: responsePayload.outputText,
+                usage: responsePayload.usage?.aiUsage(cost: providerReportedCost(from: data))
+            )
         }
+    }
+
+    private func providerReportedCost(from data: Data) -> ProviderReportedCost? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        let preferredKeys = [
+            "total_cost_toman",
+            "total_cost_usd",
+            "total_cost",
+            "cost_toman",
+            "cost_usd",
+            "cost"
+        ]
+
+        for key in preferredKeys {
+            if let cost = findProviderReportedCost(in: json, matchingKey: key) {
+                return cost
+            }
+        }
+
+        return findProviderReportedCost(in: json)
+    }
+
+    private func findProviderReportedCost(in value: Any, matchingKey expectedKey: String) -> ProviderReportedCost? {
+        if let dictionary = value as? [String: Any] {
+            for (key, nestedValue) in dictionary {
+                let normalizedKey = key.lowercased()
+                if normalizedKey == expectedKey,
+                   let amount = numericValue(from: nestedValue) {
+                    return ProviderReportedCost(
+                        amount: amount,
+                        currency: currencyName(from: normalizedKey)
+                    )
+                }
+
+                if let nestedCost = findProviderReportedCost(in: nestedValue, matchingKey: expectedKey) {
+                    return nestedCost
+                }
+            }
+        }
+
+        if let array = value as? [Any] {
+            for item in array {
+                if let nestedCost = findProviderReportedCost(in: item, matchingKey: expectedKey) {
+                    return nestedCost
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func findProviderReportedCost(in value: Any) -> ProviderReportedCost? {
+        if let dictionary = value as? [String: Any] {
+            for (key, nestedValue) in dictionary {
+                let normalizedKey = key.lowercased()
+                if normalizedKey.contains("cost") || normalizedKey.contains("price") {
+                    if let amount = numericValue(from: nestedValue) {
+                        return ProviderReportedCost(
+                            amount: amount,
+                            currency: currencyName(from: normalizedKey)
+                        )
+                    }
+                }
+
+                if let nestedCost = findProviderReportedCost(in: nestedValue) {
+                    return nestedCost
+                }
+            }
+        }
+
+        if let array = value as? [Any] {
+            for item in array {
+                if let nestedCost = findProviderReportedCost(in: item) {
+                    return nestedCost
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func numericValue(from value: Any) -> Double? {
+        if let double = value as? Double {
+            return double
+        }
+
+        if let int = value as? Int {
+            return Double(int)
+        }
+
+        if let string = value as? String {
+            return Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        return nil
+    }
+
+    private func currencyName(from key: String) -> String? {
+        if key.contains("usd") {
+            return "USD"
+        }
+
+        if key.contains("toman") {
+            return "toman"
+        }
+
+        if key.contains("irr") || key.contains("rial") {
+            return "IRR"
+        }
+
+        return nil
     }
 
     private static func makeTranslationSchema() -> [String: Any] {
@@ -576,8 +729,27 @@ private struct OpenAIErrorResponse: Decodable {
     }
 }
 
+private struct ModelListResponse: Decodable {
+    let data: [ModelItem]
+
+    struct ModelItem: Decodable {
+        let id: String
+    }
+}
+
+private struct AIOutputResult {
+    let text: String?
+    let usage: AIUsage?
+}
+
+private struct ProviderReportedCost {
+    let amount: Double
+    let currency: String?
+}
+
 private struct OpenAIResponse: Decodable {
     let output: [OutputItem]
+    let usage: ResponsesUsage?
 
     var outputText: String? {
         output.compactMap { item in
@@ -608,8 +780,31 @@ private struct OpenAIResponse: Decodable {
     }
 }
 
+private struct ResponsesUsage: Decodable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let totalTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case totalTokens = "total_tokens"
+    }
+
+    func aiUsage(cost: ProviderReportedCost?) -> AIUsage {
+        AIUsage(
+            inputTokens: inputTokens ?? 0,
+            outputTokens: outputTokens ?? 0,
+            totalTokens: totalTokens ?? ((inputTokens ?? 0) + (outputTokens ?? 0)),
+            providerReportedCost: cost?.amount,
+            costCurrency: cost?.currency
+        )
+    }
+}
+
 private struct ChatCompletionResponse: Decodable {
     let choices: [Choice]
+    let usage: ChatUsage?
 
     var outputText: String? {
         choices.compactMap(\.message.content).first { !$0.isEmpty }
@@ -626,5 +821,27 @@ private struct ChatCompletionResponse: Decodable {
     struct Message: Decodable {
         let content: String?
         let refusal: String?
+    }
+}
+
+private struct ChatUsage: Decodable {
+    let promptTokens: Int?
+    let completionTokens: Int?
+    let totalTokens: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+    }
+
+    func aiUsage(cost: ProviderReportedCost?) -> AIUsage {
+        AIUsage(
+            inputTokens: promptTokens ?? 0,
+            outputTokens: completionTokens ?? 0,
+            totalTokens: totalTokens ?? ((promptTokens ?? 0) + (completionTokens ?? 0)),
+            providerReportedCost: cost?.amount,
+            costCurrency: cost?.currency
+        )
     }
 }

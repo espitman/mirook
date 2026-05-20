@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import CoreText
 import Foundation
 
 enum TextPDFExportServiceError: LocalizedError {
@@ -18,15 +19,23 @@ enum TextPDFExportServiceError: LocalizedError {
 
 struct TextPDFExportService {
     private let pageSize = CGSize(width: 595, height: 842)
-    private let margin: CGFloat = 56
-    private let paragraphSpacing: CGFloat = 12
+    private let frameSafetyPadding: CGFloat = 12
+    private let minimumFrameHeight: CGFloat = 72
 
-    func export(pages: [TranslatedTextPage], to url: URL) throws {
+    func export(
+        pages: [TranslatedTextPage],
+        to url: URL,
+        options: TextPDFExportOptions = .default
+    ) throws {
+        Self.registerBundledFontsIfNeeded()
+
         let sortedPages = pages.sorted { $0.pageIndex < $1.pageIndex }
         guard !sortedPages.isEmpty else {
             throw TextPDFExportServiceError.noPages
         }
 
+        let margin = CGFloat(options.margin)
+        let paragraphSpacing = CGFloat(options.paragraphSpacing)
         var mediaBox = CGRect(origin: .zero, size: pageSize)
         guard let consumer = CGDataConsumer(url: url as CFURL),
               let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
@@ -57,53 +66,77 @@ struct TextPDFExportService {
             let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalizedText.isEmpty else { return }
 
-            let attributes = attributes(for: role)
-            let textWidth = pageSize.width - margin * 2
-            var remainingWords = normalizedText.split(whereSeparator: \.isWhitespace).map(String.init)
+            let attributedText = attributedString(for: normalizedText, role: role, options: options)
+            let framesetter = CTFramesetterCreateWithAttributedString(attributedText)
+            let fullLength = attributedText.length
+            var rangeStart = 0
 
-            if remainingWords.isEmpty {
-                remainingWords = [normalizedText]
-            }
+            while rangeStart < fullLength {
+                beginPageIfNeeded()
 
-            while !remainingWords.isEmpty {
-                let availableHeight = pageSize.height - margin - cursorY
-                if availableHeight < 48 {
+                var availableHeight = pageSize.height - margin - cursorY
+                if availableHeight < minimumFrameHeight {
+                    endPageIfNeeded()
+                    beginPageIfNeeded()
+                    availableHeight = pageSize.height - margin - cursorY
+                }
+
+                let frameHeight = max(availableHeight - frameSafetyPadding, 1)
+                let frameRect = CGRect(
+                    x: margin,
+                    y: pageSize.height - cursorY - frameHeight,
+                    width: pageSize.width - margin * 2,
+                    height: frameHeight
+                )
+                let path = CGPath(rect: frameRect, transform: nil)
+                let requestedRange = CFRange(
+                    location: rangeStart,
+                    length: fullLength - rangeStart
+                )
+                let frame = CTFramesetterCreateFrame(
+                    framesetter,
+                    requestedRange,
+                    path,
+                    nil
+                )
+                let visibleRange = CTFrameGetVisibleStringRange(frame)
+
+                guard visibleRange.length > 0 else {
                     endPageIfNeeded()
                     beginPageIfNeeded()
                     continue
                 }
 
-                let fittingCount = bestFittingWordCount(
-                    words: remainingWords,
-                    width: textWidth,
-                    maxHeight: availableHeight,
-                    attributes: attributes
-                )
-                let count = max(1, fittingCount)
-                let chunk = remainingWords.prefix(count).joined(separator: " ")
-                let height = measuredHeight(for: chunk, width: textWidth, attributes: attributes)
-                let drawRect = CGRect(
-                    x: margin,
-                    y: pageSize.height - cursorY - height,
-                    width: textWidth,
-                    height: height
+                context.saveGState()
+                context.textMatrix = .identity
+                CTFrameDraw(frame, context)
+                context.restoreGState()
+
+                let suggestedSize = CTFramesetterSuggestFrameSizeWithConstraints(
+                    framesetter,
+                    visibleRange,
+                    nil,
+                    CGSize(width: frameRect.width, height: .greatestFiniteMagnitude),
+                    nil
                 )
 
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-                NSString(string: chunk).draw(
-                    with: drawRect,
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    attributes: attributes
+                let usedHeight = min(
+                    frameHeight,
+                    max(1, ceil(suggestedSize.height + frameSafetyPadding))
                 )
-                NSGraphicsContext.restoreGraphicsState()
 
-                cursorY += height + paragraphSpacing
-                remainingWords.removeFirst(count)
+                cursorY += usedHeight + paragraphSpacing
+                rangeStart += visibleRange.length
             }
         }
 
         for page in sortedPages {
+            if page.isBlank {
+                beginPageIfNeeded()
+                endPageIfNeeded()
+                continue
+            }
+
             draw("صفحه \(page.pageNumber)", role: .caption)
             for paragraph in page.translatedText.components(separatedBy: .newlines) {
                 draw(paragraph, role: .paragraph)
@@ -115,60 +148,56 @@ struct TextPDFExportService {
         context.closePDF()
     }
 
-    private func attributes(for role: TextRole) -> [NSAttributedString.Key: Any] {
+    private func attributedString(
+        for text: String,
+        role: TextRole,
+        options: TextPDFExportOptions
+    ) -> NSAttributedString {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.baseWritingDirection = .rightToLeft
         paragraphStyle.alignment = .right
         paragraphStyle.lineBreakMode = .byWordWrapping
-        paragraphStyle.lineSpacing = 4
-        paragraphStyle.paragraphSpacing = paragraphSpacing
+        paragraphStyle.lineSpacing = CGFloat(options.lineSpacing)
+        paragraphStyle.paragraphSpacing = CGFloat(options.paragraphSpacing)
 
-        let fontSize: CGFloat = role == .caption ? 11 : 15
+        let bodyFontSize = CGFloat(options.bodyFontSize)
+        let fontSize: CGFloat = role == .caption ? max(bodyFontSize - 4, 9) : bodyFontSize
         let weight: NSFont.Weight = role == .caption ? .semibold : .regular
 
-        return [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: weight),
+        return NSAttributedString(string: text, attributes: [
+            .font: font(for: options.font, role: role, size: fontSize, weight: weight),
             .foregroundColor: NSColor(calibratedWhite: 0.06, alpha: 1),
             .paragraphStyle: paragraphStyle
-        ]
+        ])
     }
 
-    private func bestFittingWordCount(
-        words: [String],
-        width: CGFloat,
-        maxHeight: CGFloat,
-        attributes: [NSAttributedString.Key: Any]
-    ) -> Int {
-        var low = 1
-        var high = words.count
-        var best = 0
-
-        while low <= high {
-            let mid = (low + high) / 2
-            let text = words.prefix(mid).joined(separator: " ")
-            let height = measuredHeight(for: text, width: width, attributes: attributes)
-            if height <= maxHeight {
-                best = mid
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
+    private func font(
+        for exportFont: TextPDFExportFont,
+        role: TextRole,
+        size: CGFloat,
+        weight: NSFont.Weight
+    ) -> NSFont {
+        switch exportFont {
+        case .vazirmatn:
+            let fontName = role == .caption ? "Vazirmatn-Bold" : "Vazirmatn-Regular"
+            return NSFont(name: fontName, size: size) ?? NSFont(name: "Vazirmatn", size: size) ?? .systemFont(ofSize: size, weight: weight)
+        case .system:
+            return .systemFont(ofSize: size, weight: weight)
         }
-
-        return best
     }
 
-    private func measuredHeight(
-        for text: String,
-        width: CGFloat,
-        attributes: [NSAttributedString.Key: Any]
-    ) -> CGFloat {
-        ceil(
-            NSString(string: text).boundingRect(
-                with: CGSize(width: width, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: attributes
-            ).height
-        )
+    private static func registerBundledFontsIfNeeded() {
+        for fontName in ["Vazirmatn-Regular", "Vazirmatn-Bold"] {
+            guard let url = bundledFontURL(named: fontName) else {
+                continue
+            }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+    }
+
+    private static func bundledFontURL(named fontName: String) -> URL? {
+        Bundle.main.url(forResource: fontName, withExtension: "ttf") ??
+            Bundle.main.url(forResource: fontName, withExtension: "ttf", subdirectory: "Fonts") ??
+            Bundle.main.url(forResource: fontName, withExtension: "ttf", subdirectory: "Resources/Fonts")
     }
 }
