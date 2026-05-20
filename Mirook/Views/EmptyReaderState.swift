@@ -6,10 +6,10 @@ struct EmptyReaderState: View {
             Image("MirookLogoMark")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 82, height: 62)
-                .padding(18)
+                .frame(width: 74, height: 74)
+                .frame(width: 112, height: 112)
                 .background(MirookTheme.panelBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .shadow(color: MirookTheme.shadow, radius: 18, y: 8)
 
             Text("Open a PDF to begin")

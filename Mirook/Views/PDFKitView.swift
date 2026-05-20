@@ -74,6 +74,7 @@ struct PDFKitView: NSViewRepresentable {
         private weak var highlightedPage: PDFPage?
         private var highlightAnnotation: PDFAnnotation?
         private var visibleParagraphID: String?
+        private var visibleParagraphPosition: ParagraphPosition?
 
         init(
             currentPageIndex: Binding<Int>,
@@ -129,16 +130,68 @@ struct PDFKitView: NSViewRepresentable {
                 return
             }
 
+            guard let position = position(for: paragraphBlock, pageIndex: pageIndex) else {
+                return
+            }
+
+            showTranslationPopover(at: position)
+        }
+
+        @MainActor
+        func closeTranslationPopover() {
+            translationPopover?.close()
+            translationPopover = nil
+            visibleParagraphID = nil
+            visibleParagraphPosition = nil
+            clearHighlight()
+        }
+
+        @MainActor
+        private func showAdjacentTranslation(offset: Int) {
+            guard let visibleParagraphPosition,
+                  let adjacentPosition = adjacentPosition(from: visibleParagraphPosition, offset: offset) else {
+                return
+            }
+
+            showTranslationPopover(at: adjacentPosition)
+        }
+
+        @MainActor
+        private func showTranslationPopover(at position: ParagraphPosition) {
+            guard let pdfView,
+                  let document = pdfView.document,
+                  let page = document.page(at: position.pageIndex),
+                  let block = block(at: position) else {
+                closeTranslationPopover()
+                return
+            }
+
             closeTranslationPopover()
-            highlightParagraph(paragraphBlock, on: page)
+            if pdfView.currentPage !== page {
+                pdfView.go(to: page)
+                currentPageIndex = position.pageIndex
+            }
+            highlightParagraph(block, on: page)
 
             let popover = NSPopover()
             popover.animates = false
             popover.behavior = .applicationDefined
-            popover.contentSize = NSSize(width: 360, height: 220)
+            popover.contentSize = NSSize(width: 392, height: 236)
             popover.contentViewController = NSHostingController(
                 rootView: ParagraphTranslationPopoverView(
-                    block: paragraphBlock,
+                    block: block,
+                    canGoPrevious: adjacentPosition(from: position, offset: -1) != nil,
+                    canGoNext: adjacentPosition(from: position, offset: 1) != nil,
+                    onPrevious: { [weak self] in
+                        Task { @MainActor in
+                            self?.showAdjacentTranslation(offset: -1)
+                        }
+                    },
+                    onNext: { [weak self] in
+                        Task { @MainActor in
+                            self?.showAdjacentTranslation(offset: 1)
+                        }
+                    },
                     onClose: { [weak self] in
                         Task { @MainActor in
                             self?.closeTranslationPopover()
@@ -147,19 +200,61 @@ struct PDFKitView: NSViewRepresentable {
                 )
             )
 
-            let sourceRectInView = pdfView.convert(paragraphBlock.pdfBounds.cgRect, from: page)
+            let sourceRectInView = pdfView.convert(block.pdfBounds.cgRect, from: page)
                 .insetBy(dx: -2, dy: -2)
             popover.show(relativeTo: sourceRectInView, of: pdfView, preferredEdge: .maxY)
             translationPopover = popover
-            visibleParagraphID = paragraphBlock.id
+            visibleParagraphID = block.id
+            visibleParagraphPosition = position
         }
 
-        @MainActor
-        func closeTranslationPopover() {
-            translationPopover?.close()
-            translationPopover = nil
-            visibleParagraphID = nil
-            clearHighlight()
+        private func position(
+            for block: TranslatedTextParagraphBlock,
+            pageIndex: Int
+        ) -> ParagraphPosition? {
+            guard let blockIndex = translatedTextPagesByIndex[pageIndex]?.paragraphBlocks.firstIndex(where: { $0.id == block.id }) else {
+                return nil
+            }
+
+            return ParagraphPosition(pageIndex: pageIndex, blockIndex: blockIndex)
+        }
+
+        private func block(at position: ParagraphPosition) -> TranslatedTextParagraphBlock? {
+            guard let page = translatedTextPagesByIndex[position.pageIndex],
+                  page.paragraphBlocks.indices.contains(position.blockIndex) else {
+                return nil
+            }
+
+            return page.paragraphBlocks[position.blockIndex]
+        }
+
+        private func adjacentPosition(
+            from position: ParagraphPosition,
+            offset: Int
+        ) -> ParagraphPosition? {
+            let positions = paragraphPositions()
+            guard let currentIndex = positions.firstIndex(of: position) else {
+                return nil
+            }
+
+            let adjacentIndex = currentIndex + offset
+            guard positions.indices.contains(adjacentIndex) else {
+                return nil
+            }
+
+            return positions[adjacentIndex]
+        }
+
+        private func paragraphPositions() -> [ParagraphPosition] {
+            translatedTextPagesByIndex.keys.sorted().flatMap { pageIndex in
+                guard let page = translatedTextPagesByIndex[pageIndex] else {
+                    return [ParagraphPosition]()
+                }
+
+                return page.paragraphBlocks.indices.map { blockIndex in
+                    ParagraphPosition(pageIndex: pageIndex, blockIndex: blockIndex)
+                }
+            }
         }
 
         private func highlightParagraph(_ block: TranslatedTextParagraphBlock, on page: PDFPage) {
@@ -188,6 +283,11 @@ struct PDFKitView: NSViewRepresentable {
             highlightAnnotation = nil
         }
     }
+}
+
+private struct ParagraphPosition: Equatable {
+    let pageIndex: Int
+    let blockIndex: Int
 }
 
 private final class HoverPDFView: PDFView {
@@ -236,6 +336,10 @@ private final class HoverPDFView: PDFView {
 
 private struct ParagraphTranslationPopoverView: View {
     let block: TranslatedTextParagraphBlock
+    let canGoPrevious: Bool
+    let canGoNext: Bool
+    let onPrevious: () -> Void
+    let onNext: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -255,13 +359,31 @@ private struct ParagraphTranslationPopoverView: View {
                     .foregroundStyle(MirookTheme.mutedInk)
 
                 Spacer()
+
+                Button {
+                    onPrevious()
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(MirookIconButtonStyle())
+                .disabled(!canGoPrevious)
+                .help("Previous translated section")
+
+                Button {
+                    onNext()
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(MirookIconButtonStyle())
+                .disabled(!canGoNext)
+                .help("Next translated section")
             }
 
             RTLPopoverTextView(text: block.translatedText, onEscape: onClose)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(12)
-        .frame(width: 360, height: 220)
+        .frame(width: 392, height: 236)
         .background(MirookTheme.panelBackground)
         .environment(\.layoutDirection, .rightToLeft)
         .onExitCommand(perform: onClose)
