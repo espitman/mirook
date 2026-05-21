@@ -1,11 +1,12 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MainWindowView: View {
     @EnvironmentObject private var documentStore: PDFDocumentStore
 
     var body: some View {
-        Group {
+        ZStack {
             if documentStore.isReadingMode, documentStore.document != nil {
                 ReadingModeView()
             } else {
@@ -29,10 +30,15 @@ struct MainWindowView: View {
                         .frame(width: 360)
                 }
             }
+
+            FileDropOverlay { url in
+                documentStore.openDroppedDocument(from: url)
+            }
         }
         .background(MirookTheme.appBackground)
         .preferredColorScheme(.light)
         .frame(minWidth: 1120, minHeight: 720)
+        .onDrop(of: supportedDropTypes, isTargeted: nil, perform: openDroppedDocuments)
         .alert("Unable to Open PDF", isPresented: errorBinding) {
             Button("OK", role: .cancel) {
                 documentStore.lastErrorMessage = nil
@@ -51,6 +57,155 @@ struct MainWindowView: View {
                 }
             }
         )
+    }
+
+    private var supportedDropTypes: [String] {
+        var types = [UTType.pdf.identifier]
+        if let mirookBookType = UTType(filenameExtension: "mrbk") {
+            types.append(mirookBookType.identifier)
+        }
+        types.append(UTType.fileURL.identifier)
+        return types
+    }
+
+    private func openDroppedDocuments(_ providers: [NSItemProvider]) -> Bool {
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                let url: URL?
+                if let data = item as? Data {
+                    url = URL(dataRepresentation: data, relativeTo: nil)
+                } else if let droppedURL = item as? URL {
+                    url = droppedURL
+                } else if let path = item as? String {
+                    url = URL(string: path)
+                } else {
+                    url = nil
+                }
+
+                guard let url else { return }
+
+                Task { @MainActor in
+                    documentStore.openDroppedDocument(from: url)
+                }
+            }
+
+            return true
+        }
+
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
+                guard let url else { return }
+
+                Task { @MainActor in
+                    documentStore.openDroppedDocument(from: url)
+                }
+            }
+
+            return true
+        }
+
+        return false
+    }
+}
+
+private struct FileDropOverlay: NSViewRepresentable {
+    let onOpen: @MainActor (URL) -> Void
+
+    func makeNSView(context: Context) -> MirookDropCatchingView {
+        let view = MirookDropCatchingView()
+        view.onOpen = { url in
+            Task { @MainActor in
+                onOpen(url)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ view: MirookDropCatchingView, context: Context) {
+        view.onOpen = { url in
+            Task { @MainActor in
+                onOpen(url)
+            }
+        }
+    }
+}
+
+final class MirookDropCatchingView: NSView {
+    var onOpen: ((URL) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes(MirookDropSupport.pasteboardTypes)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes(MirookDropSupport.pasteboardTypes)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        MirookDropSupport.acceptableFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        MirookDropSupport.acceptableFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = MirookDropSupport.acceptableFileURL(from: sender.draggingPasteboard) else {
+            return false
+        }
+
+        onOpen?(url)
+        return true
+    }
+}
+
+enum MirookDropSupport {
+    static let pasteboardTypes: [NSPasteboard.PasteboardType] = [
+        .fileURL,
+        .URL,
+        NSPasteboard.PasteboardType(UTType.pdf.identifier)
+    ]
+
+    static func acceptableFileURL(from pasteboard: NSPasteboard) -> URL? {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
+           let url = urls.first(where: isSupportedDocumentURL) {
+            return url
+        }
+
+        for type in [NSPasteboard.PasteboardType.fileURL, .URL] {
+            if let string = pasteboard.string(forType: type),
+               let url = URL(string: string),
+               isSupportedDocumentURL(url) {
+                return url
+            }
+        }
+
+        if let data = pasteboard.data(forType: .fileURL),
+           let url = URL(dataRepresentation: data, relativeTo: nil),
+           isSupportedDocumentURL(url) {
+            return url
+        }
+
+        return nil
+    }
+
+    private static func isSupportedDocumentURL(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "pdf", "mrbk", "mirookbook":
+            return true
+        default:
+            return false
+        }
     }
 }
 
@@ -199,7 +354,10 @@ private struct ReadingModeView: View {
                     currentPageIndex: $documentStore.currentPageIndex,
                     zoomScale: $documentStore.zoomScale,
                     translatedTextPagesByIndex: documentStore.translatedTextPagesByIndex,
-                    allowsTranslationPopover: false
+                    allowsTranslationPopover: false,
+                    onFileDropped: { url in
+                        documentStore.openDroppedDocument(from: url)
+                    }
                 )
             } else {
                 EmptyReaderState()

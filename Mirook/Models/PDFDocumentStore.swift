@@ -209,6 +209,17 @@ final class PDFDocumentStore: ObservableObject {
         }
     }
 
+    func openDroppedDocument(from url: URL) {
+        switch url.pathExtension.lowercased() {
+        case "pdf":
+            openPDF(from: url)
+        case "mrbk", "mirookbook":
+            openBook(from: url)
+        default:
+            lastErrorMessage = "Drop a PDF or Mirook Book (.mrbk) file."
+        }
+    }
+
     func openBook(from url: URL) {
         do {
             let package = try translationProjectStore.loadProject(fromBookURL: url)

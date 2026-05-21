@@ -7,6 +7,7 @@ struct PDFKitView: NSViewRepresentable {
     @Binding var zoomScale: CGFloat
     let translatedTextPagesByIndex: [Int: TranslatedTextPage]
     var allowsTranslationPopover = true
+    var onFileDropped: ((URL) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -36,6 +37,7 @@ struct PDFKitView: NSViewRepresentable {
                 coordinator?.closeTranslationPopover()
             }
         }
+        pdfView.onFileDropped = onFileDropped
 
         NotificationCenter.default.addObserver(
             context.coordinator,
@@ -64,6 +66,9 @@ struct PDFKitView: NSViewRepresentable {
 
         context.coordinator.translatedTextPagesByIndex = translatedTextPagesByIndex
         context.coordinator.allowsTranslationPopover = allowsTranslationPopover
+        if let interactivePDFView = pdfView as? InteractivePDFView {
+            interactivePDFView.onFileDropped = onFileDropped
+        }
         if !allowsTranslationPopover {
             context.coordinator.closeTranslationPopover()
         }
@@ -454,7 +459,18 @@ private final class InteractivePDFView: PDFView {
     var onMouseClickedInView: ((NSPoint) -> Void)?
     var onMouseMovedInView: ((NSPoint) -> Bool)?
     var onEscapePressed: (() -> Void)?
+    var onFileDropped: ((URL) -> Void)?
     private var cursorTrackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes(MirookDropSupport.pasteboardTypes)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes(MirookDropSupport.pasteboardTypes)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -503,6 +519,23 @@ private final class InteractivePDFView: PDFView {
         }
 
         super.keyDown(with: event)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        MirookDropSupport.acceptableFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        MirookDropSupport.acceptableFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = MirookDropSupport.acceptableFileURL(from: sender.draggingPasteboard) else {
+            return false
+        }
+
+        onFileDropped?(url)
+        return true
     }
 }
 

@@ -17,7 +17,10 @@ struct ReaderView: View {
                         document: document,
                         currentPageIndex: $documentStore.currentPageIndex,
                         zoomScale: $documentStore.zoomScale,
-                        translatedTextPagesByIndex: documentStore.translatedTextPagesByIndex
+                        translatedTextPagesByIndex: documentStore.translatedTextPagesByIndex,
+                        onFileDropped: { url in
+                            documentStore.openDroppedDocument(from: url)
+                        }
                     )
                 } else {
                     EmptyReaderState()
