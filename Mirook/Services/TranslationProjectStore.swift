@@ -1,11 +1,20 @@
+import CommonCrypto
 import CryptoKit
 import Foundation
+import Security
 import SQLite3
 
-struct TranslationProjectStore {
+struct TranslationProjectPackage {
+    let manifest: TranslationProjectManifest
+    let pdfData: Data
+    let bookURL: URL
+}
+
+final class TranslationProjectStore {
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private var unlockedKeysByBookPath: [String: SymmetricKey] = [:]
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -15,7 +24,9 @@ struct TranslationProjectStore {
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
+        try? migrateLegacyBookFilesIfNeeded()
         try? migrateAllLegacyProjectsIfNeeded()
+        try? embedAvailableSourcePDFsInExistingBooks()
     }
 
     func loadOrCreateProject(
@@ -28,11 +39,15 @@ struct TranslationProjectStore {
         let id = try projectID(for: sourceURL, pageCount: pageCount)
         try migrateLegacyProjectIfNeeded(projectID: id, displayName: displayName)
 
+        let bookURL = try bookURL(projectID: id, displayName: displayName)
+        let database = try MirookBookDatabase(url: bookURL)
+        try requireUnlockedIfNeeded(database: database, bookURL: bookURL)
+
         let now = Date()
         var manifest: TranslationProjectManifest
 
-        if let existingManifest = try loadManifestIfExists(projectID: id) {
-            manifest = existingManifest
+        if let data = try loadMetadataPayload(key: MetadataKey.manifest, database: database, bookURL: bookURL) {
+            manifest = try decoder.decode(TranslationProjectManifest.self, from: data)
             manifest.sourcePath = sourceURL.path
             manifest.displayName = displayName
             manifest.pageCount = pageCount
@@ -52,8 +67,26 @@ struct TranslationProjectStore {
             )
         }
 
-        try saveManifest(manifest)
+        try saveManifest(manifest, database: database, bookURL: bookURL)
+        try embedSourcePDFIfNeeded(projectID: id, sourceURL: sourceURL)
         return manifest
+    }
+
+    func loadProject(fromBookURL url: URL) throws -> TranslationProjectPackage {
+        let bookURL = try normalizedBookURL(url)
+        let database = try MirookBookDatabase(url: bookURL)
+        try requireUnlockedIfNeeded(database: database, bookURL: bookURL)
+
+        guard let data = try loadMetadataPayload(key: MetadataKey.manifest, database: database, bookURL: bookURL) else {
+            throw TranslationProjectStoreError.missingManifest(projectID: bookURL.deletingPathExtension().lastPathComponent)
+        }
+
+        let manifest = try decoder.decode(TranslationProjectManifest.self, from: data)
+        guard let pdfData = try embeddedPDFData(database: database, bookURL: bookURL, manifest: manifest) else {
+            throw TranslationProjectStoreError.missingEmbeddedPDF(displayName: manifest.displayName)
+        }
+
+        return TranslationProjectPackage(manifest: manifest, pdfData: pdfData, bookURL: bookURL)
     }
 
     func loadPages(projectID: String) throws -> [Int: TranslatedTextPage] {
@@ -62,9 +95,10 @@ struct TranslationProjectStore {
         }
 
         let database = try MirookBookDatabase(url: bookURL)
-        var pagesByIndex: [Int: TranslatedTextPage] = [:]
+        try requireUnlockedIfNeeded(database: database, bookURL: bookURL)
 
-        for (pageIndex, data) in try database.loadPageJSONData() {
+        var pagesByIndex: [Int: TranslatedTextPage] = [:]
+        for (pageIndex, data) in try loadPagePayloads(database: database, bookURL: bookURL) {
             let page = try decoder.decode(TranslatedTextPage.self, from: data)
             pagesByIndex[page.pageIndex] = page
 
@@ -77,16 +111,18 @@ struct TranslationProjectStore {
     }
 
     func savePage(_ page: TranslatedTextPage, projectID: String) throws {
-        let database = try MirookBookDatabase(url: try bookURL(projectID: projectID))
+        let bookURL = try bookURL(projectID: projectID)
+        let database = try MirookBookDatabase(url: bookURL)
         let data = try encoder.encode(page)
-        try database.savePageJSONData(data, pageIndex: page.pageIndex)
+        try savePagePayload(data, pageIndex: page.pageIndex, database: database, bookURL: bookURL)
         try touchManifest(projectID: projectID)
     }
 
     func saveExportOptions(_ options: TextPDFExportOptions, projectID: String) throws {
-        let database = try MirookBookDatabase(url: try bookURL(projectID: projectID))
+        let bookURL = try bookURL(projectID: projectID)
+        let database = try MirookBookDatabase(url: bookURL)
         let data = try encoder.encode(options)
-        try database.saveMetadataJSONData(data, key: MetadataKey.exportOptions)
+        try saveMetadataPayload(data, key: MetadataKey.exportOptions, database: database, bookURL: bookURL)
         try touchManifest(projectID: projectID)
     }
 
@@ -96,7 +132,7 @@ struct TranslationProjectStore {
         }
 
         let database = try MirookBookDatabase(url: bookURL)
-        guard let data = try database.loadMetadataJSONData(key: MetadataKey.exportOptions) else {
+        guard let data = try loadMetadataPayload(key: MetadataKey.exportOptions, database: database, bookURL: bookURL) else {
             return nil
         }
 
@@ -117,13 +153,131 @@ struct TranslationProjectStore {
         return manifest
     }
 
+    func embedSourcePDFIfNeeded(projectID: String, sourceURL: URL) throws {
+        let bookURL = try bookURL(projectID: projectID)
+        let database = try MirookBookDatabase(url: bookURL)
+        try requireUnlockedIfNeeded(database: database, bookURL: bookURL)
+
+        if try loadMetadataPayload(key: MetadataKey.sourcePDF, database: database, bookURL: bookURL) != nil {
+            return
+        }
+
+        let data = try Data(contentsOf: sourceURL)
+        try saveMetadataPayload(data, key: MetadataKey.sourcePDF, database: database, bookURL: bookURL)
+    }
+
     func projectDirectoryURL(projectID: String) throws -> URL {
         try bookURL(projectID: projectID)
+    }
+
+    func isPasswordProtected(projectID: String) throws -> Bool {
+        guard let bookURL = try existingBookURL(projectID: projectID) else {
+            return false
+        }
+
+        return try MirookBookDatabase(url: bookURL).loadInfoData(key: InfoKey.encryption) != nil
+    }
+
+    func unlockProject(projectID: String, password: String) throws {
+        guard let bookURL = try existingBookURL(projectID: projectID) else {
+            throw TranslationProjectStoreError.missingManifest(projectID: projectID)
+        }
+
+        try unlockBook(at: bookURL, password: password)
+    }
+
+    func unlockBook(at url: URL, password: String) throws {
+        let bookURL = try normalizedBookURL(url)
+        let database = try MirookBookDatabase(url: bookURL)
+        guard let encryptionMetadata = try encryptionMetadata(database: database) else {
+            return
+        }
+
+        let key = try BookPasswordCrypto.deriveKey(
+            password: password,
+            salt: encryptionMetadata.salt,
+            iterations: encryptionMetadata.iterations
+        )
+
+        do {
+            let checkData = try BookPasswordCrypto.decrypt(encryptionMetadata.passwordCheck, using: key)
+            guard String(data: checkData, encoding: .utf8) == BookPasswordCrypto.passwordCheckText else {
+                throw TranslationProjectStoreError.invalidPassword
+            }
+        } catch {
+            throw TranslationProjectStoreError.invalidPassword
+        }
+
+        unlockedKeysByBookPath[bookURL.standardizedFileURL.path] = key
+    }
+
+    func setPassword(projectID: String, password: String) throws {
+        guard !password.isEmpty else {
+            throw TranslationProjectStoreError.emptyPassword
+        }
+
+        let bookURL = try bookURL(projectID: projectID)
+        let database = try MirookBookDatabase(url: bookURL)
+        guard try encryptionMetadata(database: database) == nil else {
+            throw TranslationProjectStoreError.bookAlreadyLocked
+        }
+
+        let payloads = try decryptedPayloads(database: database, bookURL: bookURL)
+        let newKey = try installEncryption(password: password, payloads: payloads, database: database, bookURL: bookURL)
+        unlockedKeysByBookPath[bookURL.standardizedFileURL.path] = newKey
+    }
+
+    func changePassword(projectID: String, oldPassword: String, newPassword: String) throws {
+        guard !newPassword.isEmpty else {
+            throw TranslationProjectStoreError.emptyPassword
+        }
+
+        let bookURL = try bookURL(projectID: projectID)
+        try unlockBook(at: bookURL, password: oldPassword)
+
+        let database = try MirookBookDatabase(url: bookURL)
+        let payloads = try decryptedPayloads(database: database, bookURL: bookURL)
+        let newKey = try installEncryption(password: newPassword, payloads: payloads, database: database, bookURL: bookURL)
+        unlockedKeysByBookPath[bookURL.standardizedFileURL.path] = newKey
+    }
+
+    func removePassword(projectID: String, password: String) throws {
+        let bookURL = try bookURL(projectID: projectID)
+        try unlockBook(at: bookURL, password: password)
+
+        let database = try MirookBookDatabase(url: bookURL)
+        let payloads = try decryptedPayloads(database: database, bookURL: bookURL)
+
+        try database.transaction {
+            for (key, data) in payloads.metadata {
+                try database.saveMetadataJSONData(data, key: key)
+            }
+            for (pageIndex, data) in payloads.pages {
+                try database.savePageJSONData(data, pageIndex: pageIndex)
+            }
+            try database.deleteInfoData(key: InfoKey.encryption)
+        }
+
+        unlockedKeysByBookPath[bookURL.standardizedFileURL.path] = nil
     }
 
     private enum MetadataKey {
         static let manifest = "manifest"
         static let exportOptions = "exportOptions"
+        static let sourcePDF = "sourcePDF"
+    }
+
+    private enum InfoKey {
+        static let encryption = "encryption"
+        static let projectID = "projectID"
+        static let displayName = "displayName"
+        static let pageCount = "pageCount"
+        static let sourcePath = "sourcePath"
+    }
+
+    private struct PayloadSnapshot {
+        let metadata: [(String, Data)]
+        let pages: [(Int, Data)]
     }
 
     private func projectID(for sourceURL: URL, pageCount: Int) throws -> String {
@@ -174,7 +328,7 @@ struct TranslationProjectStore {
             return existingURL
         }
 
-        return try booksRootURL().appendingPathComponent("\(projectID).mirookbook")
+        return try booksRootURL().appendingPathComponent("\(projectID).mrbk")
     }
 
     private func bookURL(projectID: String, displayName: String) throws -> URL {
@@ -183,15 +337,17 @@ struct TranslationProjectStore {
         }
 
         return try booksRootURL().appendingPathComponent(
-            "\(projectFileName(displayName: displayName, projectID: projectID)).mirookbook"
+            "\(projectFileName(displayName: displayName, projectID: projectID)).mrbk"
         )
     }
 
     private func existingBookURL(projectID: String) throws -> URL? {
         let rootURL = try booksRootURL()
-        let exactURL = rootURL.appendingPathComponent("\(projectID).mirookbook")
-        if fileManager.fileExists(atPath: exactURL.path) {
-            return exactURL
+        for fileExtension in ["mrbk", "mirookbook"] {
+            let exactURL = rootURL.appendingPathComponent("\(projectID).\(fileExtension)")
+            if fileManager.fileExists(atPath: exactURL.path) {
+                return try normalizedBookURL(exactURL)
+            }
         }
 
         let shortID = String(projectID.prefix(12))
@@ -201,13 +357,23 @@ struct TranslationProjectStore {
             options: [.skipsHiddenFiles]
         )
 
-        for bookURL in bookURLs where bookURL.pathExtension == "mirookbook" {
+        for candidateURL in bookURLs where ["mrbk", "mirookbook"].contains(candidateURL.pathExtension) {
+            let bookURL = try normalizedBookURL(candidateURL)
+
             if bookURL.deletingPathExtension().lastPathComponent.hasSuffix(" - \(shortID)") {
                 return bookURL
             }
 
-            guard let database = try? MirookBookDatabase(url: bookURL),
-                  let data = try? database.loadMetadataJSONData(key: MetadataKey.manifest),
+            guard let database = try? MirookBookDatabase(url: bookURL) else {
+                continue
+            }
+
+            if let publicProjectID = try? database.loadInfoText(key: InfoKey.projectID),
+               publicProjectID == projectID {
+                return bookURL
+            }
+
+            guard let data = try? database.loadMetadataJSONData(key: MetadataKey.manifest),
                   let manifest = try? decoder.decode(TranslationProjectManifest.self, from: data),
                   manifest.id == projectID else {
                 continue
@@ -219,10 +385,37 @@ struct TranslationProjectStore {
         return nil
     }
 
+    private func normalizedBookURL(_ url: URL) throws -> URL {
+        guard url.pathExtension == "mirookbook" else {
+            return url
+        }
+
+        let targetURL = url.deletingPathExtension().appendingPathExtension("mrbk")
+        if fileManager.fileExists(atPath: targetURL.path) {
+            return targetURL
+        }
+
+        try fileManager.moveItem(at: url, to: targetURL)
+        return targetURL
+    }
+
     private func saveManifest(_ manifest: TranslationProjectManifest) throws {
-        let database = try MirookBookDatabase(url: try bookURL(projectID: manifest.id, displayName: manifest.displayName))
+        let bookURL = try bookURL(projectID: manifest.id, displayName: manifest.displayName)
+        let database = try MirookBookDatabase(url: bookURL)
+        try saveManifest(manifest, database: database, bookURL: bookURL)
+    }
+
+    private func saveManifest(_ manifest: TranslationProjectManifest, database: MirookBookDatabase, bookURL: URL) throws {
+        try savePublicInfo(manifest, database: database)
         let data = try encoder.encode(manifest)
-        try database.saveMetadataJSONData(data, key: MetadataKey.manifest)
+        try saveMetadataPayload(data, key: MetadataKey.manifest, database: database, bookURL: bookURL)
+    }
+
+    private func savePublicInfo(_ manifest: TranslationProjectManifest, database: MirookBookDatabase) throws {
+        try database.saveInfoText(manifest.id, key: InfoKey.projectID)
+        try database.saveInfoText(manifest.displayName, key: InfoKey.displayName)
+        try database.saveInfoText("\(manifest.pageCount)", key: InfoKey.pageCount)
+        try database.saveInfoText(manifest.sourcePath, key: InfoKey.sourcePath)
     }
 
     private func loadManifest(projectID: String) throws -> TranslationProjectManifest {
@@ -239,7 +432,7 @@ struct TranslationProjectStore {
         }
 
         let database = try MirookBookDatabase(url: bookURL)
-        guard let data = try database.loadMetadataJSONData(key: MetadataKey.manifest) else {
+        guard let data = try loadMetadataPayload(key: MetadataKey.manifest, database: database, bookURL: bookURL) else {
             return nil
         }
 
@@ -253,6 +446,190 @@ struct TranslationProjectStore {
 
         manifest.updatedAt = Date()
         try saveManifest(manifest)
+    }
+
+    private func loadMetadataPayload(key: String, database: MirookBookDatabase, bookURL: URL) throws -> Data? {
+        guard let data = try database.loadMetadataJSONData(key: key) else {
+            return nil
+        }
+
+        guard try encryptionMetadata(database: database) != nil else {
+            return data
+        }
+
+        return try BookPasswordCrypto.decrypt(data, using: requiredUnlockedKey(for: bookURL, database: database))
+    }
+
+    private func saveMetadataPayload(_ data: Data, key: String, database: MirookBookDatabase, bookURL: URL) throws {
+        let payload = if try encryptionMetadata(database: database) != nil {
+            try BookPasswordCrypto.encrypt(data, using: requiredUnlockedKey(for: bookURL, database: database))
+        } else {
+            data
+        }
+
+        try database.saveMetadataJSONData(payload, key: key)
+    }
+
+    private func loadPagePayloads(database: MirookBookDatabase, bookURL: URL) throws -> [(Int, Data)] {
+        let pages = try database.loadPageJSONData()
+        guard try encryptionMetadata(database: database) != nil else {
+            return pages
+        }
+
+        let key = try requiredUnlockedKey(for: bookURL, database: database)
+        return try pages.map { pageIndex, data in
+            (pageIndex, try BookPasswordCrypto.decrypt(data, using: key))
+        }
+    }
+
+    private func savePagePayload(_ data: Data, pageIndex: Int, database: MirookBookDatabase, bookURL: URL) throws {
+        let payload = if try encryptionMetadata(database: database) != nil {
+            try BookPasswordCrypto.encrypt(data, using: requiredUnlockedKey(for: bookURL, database: database))
+        } else {
+            data
+        }
+
+        try database.savePageJSONData(payload, pageIndex: pageIndex)
+    }
+
+    private func decryptedPayloads(database: MirookBookDatabase, bookURL: URL) throws -> PayloadSnapshot {
+        let metadata: [(String, Data)]
+        let pages: [(Int, Data)]
+
+        if try encryptionMetadata(database: database) != nil {
+            let key = try requiredUnlockedKey(for: bookURL, database: database)
+            metadata = try database.loadAllMetadataJSONData().map { keyName, data in
+                (keyName, try BookPasswordCrypto.decrypt(data, using: key))
+            }
+            pages = try database.loadPageJSONData().map { pageIndex, data in
+                (pageIndex, try BookPasswordCrypto.decrypt(data, using: key))
+            }
+        } else {
+            metadata = try database.loadAllMetadataJSONData()
+            pages = try database.loadPageJSONData()
+        }
+
+        return PayloadSnapshot(metadata: metadata, pages: pages)
+    }
+
+    private func installEncryption(
+        password: String,
+        payloads: PayloadSnapshot,
+        database: MirookBookDatabase,
+        bookURL: URL
+    ) throws -> SymmetricKey {
+        let salt = try BookPasswordCrypto.randomData(count: 16)
+        let key = try BookPasswordCrypto.deriveKey(
+            password: password,
+            salt: salt,
+            iterations: BookPasswordCrypto.defaultIterations
+        )
+        let check = try BookPasswordCrypto.encrypt(Data(BookPasswordCrypto.passwordCheckText.utf8), using: key)
+        let metadata = BookEncryptionMetadata(
+            iterations: BookPasswordCrypto.defaultIterations,
+            salt: salt,
+            passwordCheck: check
+        )
+        let encryptionData = try encoder.encode(metadata)
+
+        try database.transaction {
+            for (keyName, data) in payloads.metadata {
+                try database.saveMetadataJSONData(try BookPasswordCrypto.encrypt(data, using: key), key: keyName)
+            }
+            for (pageIndex, data) in payloads.pages {
+                try database.savePageJSONData(try BookPasswordCrypto.encrypt(data, using: key), pageIndex: pageIndex)
+            }
+            try database.saveInfoData(encryptionData, key: InfoKey.encryption)
+        }
+
+        return key
+    }
+
+    private func requireUnlockedIfNeeded(database: MirookBookDatabase, bookURL: URL) throws {
+        guard try encryptionMetadata(database: database) != nil else {
+            return
+        }
+
+        _ = try requiredUnlockedKey(for: bookURL, database: database)
+    }
+
+    private func requiredUnlockedKey(for bookURL: URL, database: MirookBookDatabase) throws -> SymmetricKey {
+        let path = bookURL.standardizedFileURL.path
+        if let key = unlockedKeysByBookPath[path] {
+            return key
+        }
+
+        throw TranslationProjectStoreError.lockedBook(
+            bookURL: bookURL,
+            displayName: (try? database.loadInfoText(key: InfoKey.displayName)) ?? bookURL.deletingPathExtension().lastPathComponent
+        )
+    }
+
+    private func encryptionMetadata(database: MirookBookDatabase) throws -> BookEncryptionMetadata? {
+        guard let data = try database.loadInfoData(key: InfoKey.encryption) else {
+            return nil
+        }
+
+        return try decoder.decode(BookEncryptionMetadata.self, from: data)
+    }
+
+    private func embeddedPDFData(
+        database: MirookBookDatabase,
+        bookURL: URL,
+        manifest: TranslationProjectManifest
+    ) throws -> Data? {
+        if let data = try loadMetadataPayload(key: MetadataKey.sourcePDF, database: database, bookURL: bookURL) {
+            return data
+        }
+
+        let sourceURL = URL(fileURLWithPath: manifest.sourcePath)
+        guard fileManager.fileExists(atPath: sourceURL.path) else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: sourceURL)
+        try saveMetadataPayload(data, key: MetadataKey.sourcePDF, database: database, bookURL: bookURL)
+        return data
+    }
+
+    private func migrateLegacyBookFilesIfNeeded() throws {
+        let rootURL = try booksRootURL()
+        let legacyBookURLs = try fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension == "mirookbook" }
+
+        for legacyURL in legacyBookURLs {
+            _ = try normalizedBookURL(legacyURL)
+        }
+    }
+
+    private func embedAvailableSourcePDFsInExistingBooks() throws {
+        let rootURL = try booksRootURL()
+        let bookURLs = try fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension == "mrbk" }
+
+        for bookURL in bookURLs {
+            let database = try MirookBookDatabase(url: bookURL)
+            guard try encryptionMetadata(database: database) == nil,
+                  let data = try database.loadMetadataJSONData(key: MetadataKey.manifest),
+                  let manifest = try? decoder.decode(TranslationProjectManifest.self, from: data),
+                  try database.loadMetadataJSONData(key: MetadataKey.sourcePDF) == nil else {
+                continue
+            }
+
+            try savePublicInfo(manifest, database: database)
+            let sourceURL = URL(fileURLWithPath: manifest.sourcePath)
+            if fileManager.fileExists(atPath: sourceURL.path) {
+                try database.saveMetadataJSONData(Data(contentsOf: sourceURL), key: MetadataKey.sourcePDF)
+            }
+        }
     }
 
     private func migrateAllLegacyProjectsIfNeeded() throws {
@@ -313,8 +690,15 @@ struct TranslationProjectStore {
         let destinationURL = try bookURL(projectID: manifest.id, displayName: manifest.displayName)
         let database = try MirookBookDatabase(url: destinationURL)
 
+        try savePublicInfo(manifest, database: database)
         if try database.loadMetadataJSONData(key: MetadataKey.manifest) == nil {
             try database.saveMetadataJSONData(manifestData, key: MetadataKey.manifest)
+        }
+
+        let sourceURL = URL(fileURLWithPath: manifest.sourcePath)
+        if fileManager.fileExists(atPath: sourceURL.path),
+           try database.loadMetadataJSONData(key: MetadataKey.sourcePDF) == nil {
+            try database.saveMetadataJSONData(Data(contentsOf: sourceURL), key: MetadataKey.sourcePDF)
         }
 
         let exportOptionsURL = projectURL.appendingPathComponent("export-options.json")
@@ -454,9 +838,15 @@ struct TranslationProjectStore {
     }
 }
 
-private enum TranslationProjectStoreError: LocalizedError {
+enum TranslationProjectStoreError: LocalizedError {
     case missingManifest(projectID: String)
     case incompleteMigration(projectName: String)
+    case lockedBook(bookURL: URL, displayName: String)
+    case invalidPassword
+    case emptyPassword
+    case bookAlreadyLocked
+    case missingEmbeddedPDF(displayName: String)
+    case crypto(message: String)
     case sqlite(message: String)
 
     var errorDescription: String? {
@@ -464,20 +854,109 @@ private enum TranslationProjectStoreError: LocalizedError {
         case let .missingManifest(projectID):
             "Mirook could not find the project manifest for \(projectID)."
         case let .incompleteMigration(projectName):
-            "Mirook could not fully migrate \(projectName) into a .mirookbook file."
+            "Mirook could not fully migrate \(projectName) into an .mrbk file."
+        case let .lockedBook(_, displayName):
+            "\(displayName) is password protected."
+        case .invalidPassword:
+            "The password is incorrect."
+        case .emptyPassword:
+            "Password cannot be empty."
+        case .bookAlreadyLocked:
+            "This book already has a password."
+        case let .missingEmbeddedPDF(displayName):
+            "The original PDF is not embedded in \(displayName), and the old source file could not be found."
+        case let .crypto(message):
+            "Mirook encryption error: \(message)"
         case let .sqlite(message):
             "Mirook storage error: \(message)"
         }
     }
 }
 
+private struct BookEncryptionMetadata: Codable {
+    let version: Int
+    let kdf: String
+    let iterations: Int
+    let salt: Data
+    let passwordCheck: Data
+
+    init(iterations: Int, salt: Data, passwordCheck: Data) {
+        version = 1
+        kdf = "PBKDF2-HMAC-SHA256"
+        self.iterations = iterations
+        self.salt = salt
+        self.passwordCheck = passwordCheck
+    }
+}
+
+private enum BookPasswordCrypto {
+    static let defaultIterations = 210_000
+    static let passwordCheckText = "mirook-password-check-v1"
+    private static let keyByteCount = 32
+
+    static func deriveKey(password: String, salt: Data, iterations: Int) throws -> SymmetricKey {
+        guard !password.isEmpty else {
+            throw TranslationProjectStoreError.emptyPassword
+        }
+
+        var keyData = Data(count: keyByteCount)
+        let status = password.withCString { passwordPointer in
+            salt.withUnsafeBytes { saltPointer in
+                keyData.withUnsafeMutableBytes { keyPointer in
+                    CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        passwordPointer,
+                        strlen(passwordPointer),
+                        saltPointer.bindMemory(to: UInt8.self).baseAddress,
+                        salt.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                        UInt32(iterations),
+                        keyPointer.bindMemory(to: UInt8.self).baseAddress,
+                        keyByteCount
+                    )
+                }
+            }
+        }
+
+        guard status == kCCSuccess else {
+            throw TranslationProjectStoreError.crypto(message: "Could not derive a password key.")
+        }
+
+        return SymmetricKey(data: keyData)
+    }
+
+    static func encrypt(_ data: Data, using key: SymmetricKey) throws -> Data {
+        guard let combined = try AES.GCM.seal(data, using: key).combined else {
+            throw TranslationProjectStoreError.crypto(message: "Could not seal encrypted data.")
+        }
+
+        return combined
+    }
+
+    static func decrypt(_ data: Data, using key: SymmetricKey) throws -> Data {
+        let sealedBox = try AES.GCM.SealedBox(combined: data)
+        return try AES.GCM.open(sealedBox, using: key)
+    }
+
+    static func randomData(count: Int) throws -> Data {
+        var data = Data(count: count)
+        let status = data.withUnsafeMutableBytes { pointer in
+            SecRandomCopyBytes(kSecRandomDefault, count, pointer.baseAddress!)
+        }
+
+        guard status == errSecSuccess else {
+            throw TranslationProjectStoreError.crypto(message: "Could not generate secure random data.")
+        }
+
+        return data
+    }
+}
+
 private final class MirookBookDatabase {
-    private let url: URL
     private var handle: OpaquePointer?
     private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     init(url: URL) throws {
-        self.url = url
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
@@ -492,6 +971,60 @@ private final class MirookBookDatabase {
 
     deinit {
         sqlite3_close(handle)
+    }
+
+    func loadInfoData(key: String) throws -> Data? {
+        let statement = try prepare("SELECT value FROM book_info WHERE key = ? LIMIT 1")
+        defer { sqlite3_finalize(statement) }
+
+        try bindText(key, to: statement, at: 1)
+        let result = sqlite3_step(statement)
+        if result == SQLITE_ROW {
+            return columnData(statement, at: 0)
+        }
+        if result == SQLITE_DONE {
+            return nil
+        }
+
+        throw TranslationProjectStoreError.sqlite(message: Self.errorMessage(for: handle))
+    }
+
+    func loadInfoText(key: String) throws -> String? {
+        guard let data = try loadInfoData(key: key) else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    func saveInfoData(_ data: Data, key: String) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO book_info (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bindText(key, to: statement, at: 1)
+        try bindData(data, to: statement, at: 2)
+        try bindText(Self.timestamp(), to: statement, at: 3)
+        try stepDone(statement)
+    }
+
+    func saveInfoText(_ text: String, key: String) throws {
+        try saveInfoData(Data(text.utf8), key: key)
+    }
+
+    func deleteInfoData(key: String) throws {
+        let statement = try prepare("DELETE FROM book_info WHERE key = ?")
+        defer { sqlite3_finalize(statement) }
+
+        try bindText(key, to: statement, at: 1)
+        try stepDone(statement)
     }
 
     func loadMetadataJSONData(key: String) throws -> Data? {
@@ -510,6 +1043,25 @@ private final class MirookBookDatabase {
         }
 
         throw TranslationProjectStoreError.sqlite(message: Self.errorMessage(for: handle))
+    }
+
+    func loadAllMetadataJSONData() throws -> [(String, Data)] {
+        let statement = try prepare("SELECT key, json FROM metadata ORDER BY key ASC")
+        defer { sqlite3_finalize(statement) }
+
+        var rows: [(String, Data)] = []
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_ROW {
+                let key = String(cString: sqlite3_column_text(statement, 0))
+                let data = columnData(statement, at: 1)
+                rows.append((key, data))
+            } else if result == SQLITE_DONE {
+                return rows
+            } else {
+                throw TranslationProjectStoreError.sqlite(message: Self.errorMessage(for: handle))
+            }
+        }
     }
 
     func saveMetadataJSONData(_ data: Data, key: String) throws {
@@ -595,7 +1147,27 @@ private final class MirookBookDatabase {
         return true
     }
 
+    func transaction(_ work: () throws -> Void) throws {
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+        do {
+            try work()
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     private func ensureSchema() throws {
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS book_info (
+                key TEXT PRIMARY KEY NOT NULL,
+                value BLOB NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         try execute(
             """
             CREATE TABLE IF NOT EXISTS metadata (
@@ -614,7 +1186,7 @@ private final class MirookBookDatabase {
             )
             """
         )
-        try execute("PRAGMA user_version = 1")
+        try execute("PRAGMA user_version = 2")
     }
 
     private func execute(_ sql: String) throws {

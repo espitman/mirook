@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @EnvironmentObject private var documentStore: PDFDocumentStore
@@ -25,9 +26,9 @@ struct SidebarView: View {
                 }
 
                 Button {
-                    openPDF()
+                    openDocument()
                 } label: {
-                    Label("Open PDF", systemImage: "plus")
+                    Label("Open PDF / Book", systemImage: "plus")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(MirookPrimaryButtonStyle())
@@ -50,6 +51,7 @@ struct SidebarView: View {
                     .mirookPanel()
 
                     usageSummary
+                    bookFileControls
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -58,6 +60,55 @@ struct SidebarView: View {
             .padding(.top, 22)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    private var bookFileControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Book File")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MirookTheme.mutedInk)
+
+            HStack(spacing: 8) {
+                Button {
+                    documentStore.revealCurrentBookFile()
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(MirookSecondaryButtonStyle())
+
+                if documentStore.isCurrentBookPasswordProtected {
+                    Button {
+                        documentStore.changeCurrentBookPassword()
+                    } label: {
+                        Image(systemName: "key")
+                    }
+                    .buttonStyle(MirookIconButtonStyle())
+                    .help("Change password")
+
+                    Button {
+                        documentStore.removeCurrentBookPassword()
+                    } label: {
+                        Image(systemName: "lock.open")
+                    }
+                    .buttonStyle(MirookIconButtonStyle())
+                    .help("Remove password")
+                } else {
+                    Button {
+                        documentStore.setCurrentBookPassword()
+                    } label: {
+                        Image(systemName: "lock")
+                    }
+                    .buttonStyle(MirookIconButtonStyle())
+                    .help("Set password")
+                }
+            }
+
+            Text(documentStore.isCurrentBookPasswordProtected ? "Password protected" : "PDF embedded in .mrbk")
+                .font(.caption)
+                .foregroundStyle(MirookTheme.mutedInk)
+        }
+        .mirookPanel()
     }
 
     @ViewBuilder
@@ -152,15 +203,20 @@ struct SidebarView: View {
         .mirookPanel()
     }
 
-    private func openPDF() {
+    private func openDocument() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
+        let mirookBookType = UTType(filenameExtension: "mrbk") ?? .data
+        panel.allowedContentTypes = [.pdf, mirookBookType]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
 
         if panel.runModal() == .OK, let url = panel.url {
-            documentStore.openPDF(from: url)
+            if url.pathExtension.lowercased() == "mrbk" {
+                documentStore.openBook(from: url)
+            } else {
+                documentStore.openPDF(from: url)
+            }
         }
     }
 }
