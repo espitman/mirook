@@ -11,7 +11,7 @@ struct MainWindowView: View {
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
 
-            if documentStore.isReadingMode, documentStore.document != nil {
+            if documentStore.isReadingMode, documentStore.hasOpenDocument {
                 ReadingModeView()
             } else {
                 HStack(spacing: 0) {
@@ -61,7 +61,7 @@ struct MainWindowView: View {
         .preferredColorScheme(.light)
         .frame(minWidth: 1120, minHeight: 720)
         .onDrop(of: supportedDropTypes, isTargeted: nil, perform: openDroppedDocuments)
-        .alert("Unable to Open PDF", isPresented: errorBinding) {
+        .alert("Unable to Open Book", isPresented: errorBinding) {
             Button("OK", role: .cancel) {
                 documentStore.lastErrorMessage = nil
             }
@@ -83,6 +83,9 @@ struct MainWindowView: View {
 
     private var supportedDropTypes: [String] {
         var types = [UTType.pdf.identifier]
+        if let epubType = UTType(filenameExtension: "epub") {
+            types.append(epubType.identifier)
+        }
         if let mirookBookType = UTType(filenameExtension: "mrbk") {
             types.append(mirookBookType.identifier)
         }
@@ -124,6 +127,20 @@ struct MainWindowView: View {
             }
 
             return true
+        }
+
+        if let epubType = UTType(filenameExtension: "epub") {
+            for provider in providers where provider.hasItemConformingToTypeIdentifier(epubType.identifier) {
+                provider.loadFileRepresentation(forTypeIdentifier: epubType.identifier) { url, _ in
+                    guard let url else { return }
+
+                    Task { @MainActor in
+                        documentStore.openDroppedDocument(from: url)
+                    }
+                }
+
+                return true
+            }
         }
 
         return false
@@ -410,7 +427,8 @@ enum MirookDropSupport {
     static let pasteboardTypes: [NSPasteboard.PasteboardType] = [
         .fileURL,
         .URL,
-        NSPasteboard.PasteboardType(UTType.pdf.identifier)
+        NSPasteboard.PasteboardType(UTType.pdf.identifier),
+        NSPasteboard.PasteboardType(UTType(filenameExtension: "epub")?.identifier ?? "org.idpf.epub-container")
     ]
 
     static func acceptableFileURL(from pasteboard: NSPasteboard) -> URL? {
@@ -442,7 +460,7 @@ enum MirookDropSupport {
 
     private static func isSupportedDocumentURL(_ url: URL) -> Bool {
         switch url.pathExtension.lowercased() {
-        case "pdf", "mrbk", "mirookbook":
+        case "pdf", "epub", "mrbk", "mirookbook":
             return true
         default:
             return false
@@ -600,6 +618,8 @@ private struct ReadingModeView: View {
                         documentStore.openDroppedDocument(from: url)
                     }
                 )
+            } else if documentStore.epubDocument != nil {
+                EPUBSourceView(page: documentStore.currentEPUBPage)
             } else {
                 EmptyReaderState()
             }

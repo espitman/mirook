@@ -31,7 +31,7 @@ struct BookPasswordDialog: Identifiable, Equatable {
     var message: String {
         switch mode {
         case .set:
-            "This password protects the embedded PDF and translations. It cannot be recovered if you forget it."
+            "This password protects the embedded source book and translations. It cannot be recovered if you forget it."
         case .change:
             "Enter the current password, then choose a new one."
         case .remove:
@@ -77,9 +77,16 @@ struct BookPasswordDialog: Identifiable, Equatable {
     }
 }
 
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
 @MainActor
 final class PDFDocumentStore: ObservableObject {
     @Published private(set) var document: PDFDocument?
+    @Published private(set) var epubDocument: EPUBDocument?
     @Published private(set) var documentURL: URL?
     @Published private(set) var documentDisplayName: String?
     @Published var currentPageIndex: Int = 0 {
@@ -128,6 +135,7 @@ final class PDFDocumentStore: ObservableObject {
     @Published var lastErrorMessage: String?
 
     private let pageRenderer = PDFPageRenderer(scale: 2.0)
+    private let epubDocumentReader = EPUBDocumentReader()
     private let translatedPageRenderer = TranslatedPageRenderer()
     private let pdfExportService = PDFExportService()
     private let textPDFExportService = TextPDFExportService()
@@ -166,11 +174,27 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     var pageCount: Int {
-        document?.pageCount ?? 0
+        document?.pageCount ?? epubDocument?.pageCount ?? 0
     }
 
     var displayName: String {
-        documentDisplayName ?? documentURL?.deletingPathExtension().lastPathComponent ?? "Untitled PDF"
+        documentDisplayName ?? documentURL?.deletingPathExtension().lastPathComponent ?? "Untitled Book"
+    }
+
+    var hasOpenDocument: Bool {
+        document != nil || epubDocument != nil
+    }
+
+    var sourceKind: SourceDocumentKind? {
+        currentTranslationProject?.sourceKind ?? (document != nil ? .pdf : (epubDocument != nil ? .epub : nil))
+    }
+
+    var sourceKindDisplayName: String {
+        sourceKind?.displayName ?? "Book"
+    }
+
+    var currentEPUBPage: EPUBSourcePage? {
+        epubDocument?.pages.indices.contains(currentPageIndex) == true ? epubDocument?.pages[currentPageIndex] : nil
     }
 
     var currentPageNumber: Int {
@@ -249,7 +273,7 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     var translatedTextCoverageDescription: String {
-        guard pageCount > 0 else { return "No PDF open" }
+        guard pageCount > 0 else { return "No book open" }
         let translatedCount = translatedTextExportPageCount - translatedTextBlankPageCount
         return "\(translatedTextExportPageCount) / \(pageCount) pages ready, \(translatedCount) translated, \(translatedTextBlankPageCount) blank, \(translatedTextMissingPageCount) missing"
     }
@@ -298,14 +322,33 @@ final class PDFDocumentStore: ObservableObject {
         }
     }
 
+    func openEPUB(from url: URL) {
+        activateSecurityScope(for: url)
+
+        do {
+            let loadedDocument = try epubDocumentReader.load(from: url)
+            try openLoadedEPUB(loadedDocument, sourceURL: url, displayName: url.deletingPathExtension().lastPathComponent)
+        } catch let error as TranslationProjectStoreError {
+            handleOpenError(error) { [self] in
+                let loadedDocument = try self.epubDocumentReader.load(from: url)
+                try self.openLoadedEPUB(loadedDocument, sourceURL: url, displayName: url.deletingPathExtension().lastPathComponent)
+            }
+        } catch {
+            resetProjectStateAfterOpenFailure()
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
     func openDroppedDocument(from url: URL) {
         switch url.pathExtension.lowercased() {
         case "pdf":
             openPDF(from: url)
+        case "epub":
+            openEPUB(from: url)
         case "mrbk", "mirookbook":
             openBook(from: url)
         default:
-            lastErrorMessage = "Drop a PDF or Mirook Book (.mrbk) file."
+            lastErrorMessage = "Drop a PDF, EPUB, or Mirook Book (.mrbk) file."
         }
     }
 
@@ -314,21 +357,13 @@ final class PDFDocumentStore: ObservableObject {
         do {
             let package = try translationProjectStore.loadProject(fromBookURL: url)
             activateSecurityScope(for: package.bookURL)
-            guard let loadedDocument = PDFDocument(data: package.pdfData) else {
-                lastErrorMessage = "The embedded PDF in this Mirook book could not be opened."
-                return
-            }
 
-            try openLoadedBook(loadedDocument, package: package)
+            try openLoadedBook(package: package)
         } catch let error as TranslationProjectStoreError {
             handleOpenError(error) { [self] in
                 let package = try self.translationProjectStore.loadProject(fromBookURL: url)
                 self.activateSecurityScope(for: package.bookURL)
-                guard let loadedDocument = PDFDocument(data: package.pdfData) else {
-                    throw TranslationProjectStoreError.missingEmbeddedPDF(displayName: url.deletingPathExtension().lastPathComponent)
-                }
-
-                try self.openLoadedBook(loadedDocument, package: package)
+                try self.openLoadedBook(package: package)
             }
         } catch {
             resetProjectStateAfterOpenFailure()
@@ -487,35 +522,89 @@ final class PDFDocumentStore: ObservableObject {
             sourceURL: sourceURL,
             displayName: loadedDocument.documentURL?.deletingPathExtension().lastPathComponent ?? displayName,
             pageCount: loadedDocument.pageCount,
+            sourceKind: .pdf,
             targetLanguage: targetLanguage,
             model: model
         )
 
         try applyOpenedDocument(
-            loadedDocument,
+            pdfDocument: loadedDocument,
+            epubDocument: nil,
             sourceURL: sourceURL,
             displayName: project.displayName,
             project: project
         )
     }
 
-    private func openLoadedBook(_ loadedDocument: PDFDocument, package: TranslationProjectPackage) throws {
+    private func openLoadedEPUB(_ loadedDocument: EPUBDocument, sourceURL: URL, displayName: String) throws {
+        let model = normalizedSetting(
+            key: SettingsKey.defaultModelName,
+            fallback: SettingsKey.fallbackModelName
+        )
+        let targetLanguage = normalizedSetting(
+            key: SettingsKey.defaultTargetLanguage,
+            fallback: SettingsKey.fallbackTargetLanguage
+        )
+        let project = try translationProjectStore.loadOrCreateProject(
+            sourceURL: sourceURL,
+            displayName: loadedDocument.title.isEmpty ? displayName : loadedDocument.title,
+            pageCount: loadedDocument.pageCount,
+            sourceKind: .epub,
+            targetLanguage: targetLanguage,
+            model: model
+        )
+
         try applyOpenedDocument(
-            loadedDocument,
-            sourceURL: package.bookURL,
-            displayName: package.manifest.displayName,
-            project: package.manifest
+            pdfDocument: nil,
+            epubDocument: loadedDocument,
+            sourceURL: sourceURL,
+            displayName: project.displayName,
+            project: project
         )
     }
 
+    private func openLoadedBook(package: TranslationProjectPackage) throws {
+        switch package.sourceKind {
+        case .pdf:
+            guard let loadedDocument = PDFDocument(data: package.sourceData) else {
+                throw TranslationProjectStoreError.missingEmbeddedSource(
+                    displayName: package.manifest.displayName,
+                    sourceKind: .pdf
+                )
+            }
+
+            try applyOpenedDocument(
+                pdfDocument: loadedDocument,
+                epubDocument: nil,
+                sourceURL: package.bookURL,
+                displayName: package.manifest.displayName,
+                project: package.manifest
+            )
+        case .epub:
+            let loadedDocument = try epubDocumentReader.load(
+                data: package.sourceData,
+                displayName: package.manifest.displayName
+            )
+            try applyOpenedDocument(
+                pdfDocument: nil,
+                epubDocument: loadedDocument,
+                sourceURL: package.bookURL,
+                displayName: package.manifest.displayName,
+                project: package.manifest
+            )
+        }
+    }
+
     private func applyOpenedDocument(
-        _ loadedDocument: PDFDocument,
+        pdfDocument loadedPDFDocument: PDFDocument?,
+        epubDocument loadedEPUBDocument: EPUBDocument?,
         sourceURL: URL?,
         displayName: String,
         project: TranslationProjectManifest
     ) throws {
         releaseInactiveSecurityScopes(keeping: sourceURL)
-        document = loadedDocument
+        document = loadedPDFDocument
+        epubDocument = loadedEPUBDocument
         documentURL = sourceURL
         documentDisplayName = displayName
         currentPageIndex = 0
@@ -534,7 +623,9 @@ final class PDFDocumentStore: ObservableObject {
 
         currentTranslationProject = project
         translatedTextPagesByIndex = try translationProjectStore.loadPages(projectID: project.id)
-        hydrateParagraphBlocksForLoadedPages(document: loadedDocument, projectID: project.id)
+        if let loadedPDFDocument {
+            hydrateParagraphBlocksForLoadedPages(document: loadedPDFDocument, projectID: project.id)
+        }
         translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
         try refreshCurrentBookPasswordStatus()
     }
@@ -560,6 +651,10 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     private func resetProjectStateAfterOpenFailure() {
+        document = nil
+        epubDocument = nil
+        documentURL = nil
+        documentDisplayName = nil
         currentTranslationProject = nil
         translatedTextPagesByIndex = [:]
         translatedTextPage = nil
@@ -644,7 +739,7 @@ final class PDFDocumentStore: ObservableObject {
 
     func renderCurrentPage() {
         guard let document else {
-            lastErrorMessage = "Open a PDF before rendering a page."
+            lastErrorMessage = "Layout preview is available for PDF sources only."
             return
         }
 
@@ -662,7 +757,7 @@ final class PDFDocumentStore: ObservableObject {
 
     func translateCurrentPage() async {
         guard document != nil else {
-            lastErrorMessage = "Open a PDF before translating a page."
+            lastErrorMessage = "Layout translation is available for PDF sources only. Use text translation for EPUB."
             return
         }
 
@@ -717,7 +812,7 @@ final class PDFDocumentStore: ObservableObject {
 
     func translateCurrentPageAsText() async {
         guard pageCount > 0 else {
-            lastErrorMessage = "Open a PDF before translating a page."
+            lastErrorMessage = "Open a book before translating a page."
             return
         }
 
@@ -728,7 +823,7 @@ final class PDFDocumentStore: ObservableObject {
 
     func translateSelectedPagesAsText() async {
         guard pageCount > 0 else {
-            lastErrorMessage = "Open a PDF before translating pages."
+            lastErrorMessage = "Open a book before translating pages."
             return
         }
 
@@ -739,7 +834,7 @@ final class PDFDocumentStore: ObservableObject {
 
     func translateMissingSelectedPagesAsText() async {
         guard pageCount > 0 else {
-            lastErrorMessage = "Open a PDF before translating pages."
+            lastErrorMessage = "Open a book before translating pages."
             return
         }
 
@@ -879,7 +974,7 @@ final class PDFDocumentStore: ObservableObject {
 
     func exportCompleteTextBook(options: TextPDFExportOptions = .default) {
         guard pageCount > 0 else {
-            lastErrorMessage = "Open a PDF before exporting a complete book."
+            lastErrorMessage = "Open a book before exporting a complete book."
             return
         }
 
@@ -963,8 +1058,8 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     private func translateTextPagesAsText(pageNumbers: [Int]) async {
-        guard let document else {
-            lastErrorMessage = "Open a PDF before translating pages."
+        guard hasOpenDocument else {
+            lastErrorMessage = "Open a book before translating pages."
             return
         }
 
@@ -1027,13 +1122,23 @@ final class PDFDocumentStore: ObservableObject {
                 textTranslationProgressCurrent = offset + 1
                 textTranslationProgressPageNumber = pageNumber
 
-                guard let page = document.page(at: pageNumber - 1) else {
+                let sourceText: String
+                if let document {
+                    guard let page = document.page(at: pageNumber - 1) else {
+                        blankPageNumbers.append(pageNumber)
+                        try cacheTranslatedTextPage(blankTextPage(pageNumber: pageNumber))
+                        continue
+                    }
+
+                    sourceText = sourceTextForTranslation(on: page)
+                } else if let epubPage = epubDocument?.pages[safe: pageNumber - 1] {
+                    sourceText = epubPage.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
                     blankPageNumbers.append(pageNumber)
                     try cacheTranslatedTextPage(blankTextPage(pageNumber: pageNumber))
                     continue
                 }
 
-                let sourceText = sourceTextForTranslation(on: page)
                 guard !sourceText.isEmpty else {
                     blankPageNumbers.append(pageNumber)
                     try cacheTranslatedTextPage(blankTextPage(pageNumber: pageNumber))

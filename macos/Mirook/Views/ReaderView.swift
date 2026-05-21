@@ -22,6 +22,8 @@ struct ReaderView: View {
                             documentStore.openDroppedDocument(from: url)
                         }
                     )
+                } else if documentStore.epubDocument != nil {
+                    EPUBSourceView(page: documentStore.currentEPUBPage)
                 } else {
                     EmptyReaderState()
                 }
@@ -43,11 +45,11 @@ struct ReaderView: View {
     private var toolbar: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(documentStore.document == nil ? "Mirook" : documentStore.displayName)
+                Text(!documentStore.hasOpenDocument ? "Mirook" : documentStore.displayName)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(MirookTheme.ink)
                     .lineLimit(1)
-                Text(documentStore.document == nil ? "Open a PDF to begin" : "\(documentStore.pageCount) pages")
+                Text(!documentStore.hasOpenDocument ? "Open a book to begin" : "\(documentStore.pageCount) pages")
                     .font(.caption)
                     .foregroundStyle(MirookTheme.mutedInk)
             }
@@ -93,7 +95,7 @@ struct ReaderView: View {
                     .font(.caption)
                     .foregroundStyle(MirookTheme.mutedInk)
             }
-            .disabled(documentStore.document == nil)
+            .disabled(!documentStore.hasOpenDocument)
 
             Spacer(minLength: 8)
 
@@ -104,7 +106,7 @@ struct ReaderView: View {
             }
             .buttonStyle(MirookIconButtonStyle())
             .help("Reading mode")
-            .disabled(documentStore.document == nil)
+            .disabled(!documentStore.hasOpenDocument)
 
             Button {
                 documentStore.zoomOut()
@@ -113,7 +115,7 @@ struct ReaderView: View {
             }
             .buttonStyle(MirookIconButtonStyle())
             .help("Zoom out")
-            .disabled(documentStore.document == nil)
+            .disabled(!documentStore.hasOpenDocument || documentStore.document == nil)
 
             Button {
                 documentStore.resetZoom()
@@ -124,7 +126,7 @@ struct ReaderView: View {
             }
             .buttonStyle(MirookSecondaryButtonStyle())
             .help("Reset zoom")
-            .disabled(documentStore.document == nil)
+            .disabled(!documentStore.hasOpenDocument || documentStore.document == nil)
 
             Button {
                 documentStore.zoomIn()
@@ -133,7 +135,7 @@ struct ReaderView: View {
             }
             .buttonStyle(MirookIconButtonStyle())
             .help("Zoom in")
-            .disabled(documentStore.document == nil)
+            .disabled(!documentStore.hasOpenDocument || documentStore.document == nil)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

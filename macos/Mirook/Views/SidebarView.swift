@@ -19,7 +19,7 @@ struct SidebarView: View {
                         Text("Mirook")
                             .font(.title2.weight(.semibold))
                             .foregroundStyle(MirookTheme.ink)
-                        Text("PDF translation workspace")
+                        Text("Book translation workspace")
                             .font(.caption)
                             .foregroundStyle(MirookTheme.mutedInk)
                     }
@@ -28,14 +28,14 @@ struct SidebarView: View {
                 Button {
                     openDocument()
                 } label: {
-                    Label("Open PDF / Book", systemImage: "plus")
+                    Label("Open PDF / EPUB / Book", systemImage: "plus")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(MirookPrimaryButtonStyle())
 
                 modelControls
 
-                if documentStore.document != nil {
+                if documentStore.hasOpenDocument {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Current Document")
                             .font(.caption.weight(.semibold))
@@ -104,7 +104,7 @@ struct SidebarView: View {
                 }
             }
 
-            Text(documentStore.isCurrentBookPasswordProtected ? "Password protected" : "PDF embedded in .mrbk")
+            Text(documentStore.isCurrentBookPasswordProtected ? "Password protected" : "\(documentStore.sourceKindDisplayName) embedded in .mrbk")
                 .font(.caption)
                 .foregroundStyle(MirookTheme.mutedInk)
         }
@@ -206,7 +206,8 @@ struct SidebarView: View {
     private func openDocument() {
         let panel = NSOpenPanel()
         let mirookBookType = UTType(filenameExtension: "mrbk") ?? .data
-        panel.allowedContentTypes = [.pdf, mirookBookType]
+        let epubType = UTType(filenameExtension: "epub") ?? .data
+        panel.allowedContentTypes = [.pdf, epubType, mirookBookType]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
@@ -214,6 +215,8 @@ struct SidebarView: View {
         if panel.runModal() == .OK, let url = panel.url {
             if url.pathExtension.lowercased() == "mrbk" {
                 documentStore.openBook(from: url)
+            } else if url.pathExtension.lowercased() == "epub" {
+                documentStore.openEPUB(from: url)
             } else {
                 documentStore.openPDF(from: url)
             }

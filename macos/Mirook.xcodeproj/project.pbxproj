@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		0F66DE5CDBB3BC3B4B88CB92 /* TextPDFExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBADB17FDF00F53D4FDCAD64 /* TextPDFExportService.swift */; };
+		0FEA00000000000000000001 /* SourceDocumentKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEA00000000000000000002 /* SourceDocumentKind.swift */; };
+		0FEA00000000000000000003 /* EPUBDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEA00000000000000000004 /* EPUBDocument.swift */; };
+		0FEA00000000000000000005 /* EPUBDocumentReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEA00000000000000000006 /* EPUBDocumentReader.swift */; };
+		0FEA00000000000000000007 /* EPUBSourceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEA00000000000000000008 /* EPUBSourceView.swift */; };
 		EBA7D3C655AA4A6A8B8B0001 /* EPUBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBA7D3C655AA4A6A8B8B0002 /* EPUBExportService.swift */; };
 		1C09C63E874FDD91342A9187 /* TranslatedPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */; };
 		257C0CF1917396D5865B371E /* Vazirmatn-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D0CBE83280A9B4215A3D46D1 /* Vazirmatn-Regular.ttf */; };
@@ -43,6 +47,10 @@
 
 /* Begin PBXFileReference section */
 		00D9193BA5616A1FBE68971C /* TranslationInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationInspectorView.swift; sourceTree = "<group>"; };
+		0FEA00000000000000000002 /* SourceDocumentKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceDocumentKind.swift; sourceTree = "<group>"; };
+		0FEA00000000000000000004 /* EPUBDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBDocument.swift; sourceTree = "<group>"; };
+		0FEA00000000000000000006 /* EPUBDocumentReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBDocumentReader.swift; sourceTree = "<group>"; };
+		0FEA00000000000000000008 /* EPUBSourceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBSourceView.swift; sourceTree = "<group>"; };
 		069894F6C093E43C23F007A8 /* OpenAIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIClient.swift; sourceTree = "<group>"; };
 		20821DB05F9C09894FB4B4D5 /* Mirook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mirook.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3073E483804981A9310B8063 /* RenderedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderedPage.swift; sourceTree = "<group>"; };
@@ -89,6 +97,7 @@
 				FF2E65E0C8D26472EB824216 /* PersianTextLayoutEngine.swift */,
 				DBADB17FDF00F53D4FDCAD64 /* TextPDFExportService.swift */,
 				EBA7D3C655AA4A6A8B8B0002 /* EPUBExportService.swift */,
+				0FEA00000000000000000006 /* EPUBDocumentReader.swift */,
 				83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */,
 				F32EE4ACE28692F3AE139263 /* TranslationProjectStore.swift */,
 			);
@@ -99,6 +108,7 @@
 			isa = PBXGroup;
 			children = (
 				86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */,
+				0FEA00000000000000000008 /* EPUBSourceView.swift */,
 				765E5EF13D1F45C5EB718690 /* MainWindowView.swift */,
 				7D978F50A4FB2D4C23C4B61C /* MirookTheme.swift */,
 				D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */,
@@ -115,10 +125,12 @@
 			children = (
 				3DEB462EEBD0F6FB92878928 /* AIModelInfo.swift */,
 				5C07D0CC8B8CF16EC3159CE4 /* AIUsage.swift */,
+				0FEA00000000000000000004 /* EPUBDocument.swift */,
 				BAA27DCE88328C692F9D9E91 /* PDFDocumentStore.swift */,
 				94A91FA09881EE7790A589CD /* PDFPageSelection.swift */,
 				3073E483804981A9310B8063 /* RenderedPage.swift */,
 				F6AD4F39194C5622544728E5 /* TextPDFExportOptions.swift */,
+				0FEA00000000000000000002 /* SourceDocumentKind.swift */,
 				F5EB3DB14983897F041D9177 /* TranslatedRenderedPage.swift */,
 				85D9C58CBAAC8D1E4C2EE5AD /* TranslatedTextPage.swift */,
 				659F0594572BE283DF58BBA9 /* TranslationModels.swift */,
@@ -248,6 +260,9 @@
 				5777BBC77CE792A1961DEE85 /* AIModelInfo.swift in Sources */,
 				4CAD865CAFD7706BA7F7BFA2 /* AIUsage.swift in Sources */,
 				B3E12E829F0F83B44CCF5D44 /* EmptyReaderState.swift in Sources */,
+				0FEA00000000000000000003 /* EPUBDocument.swift in Sources */,
+				0FEA00000000000000000005 /* EPUBDocumentReader.swift in Sources */,
+				0FEA00000000000000000007 /* EPUBSourceView.swift in Sources */,
 				B41271B3DC00D229636CF296 /* KeychainService.swift in Sources */,
 				D768F965987410281BDB816B /* MainWindowView.swift in Sources */,
 				75F8CDD58DE1CB9DBEC8C567 /* MirookTheme.swift in Sources */,
@@ -263,6 +278,7 @@
 				39A08E67C16B383C5A1DB404 /* RenderedPage.swift in Sources */,
 				C103715143428A3C8D495BC9 /* SettingsView.swift in Sources */,
 				BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */,
+				0FEA00000000000000000001 /* SourceDocumentKind.swift in Sources */,
 				25FBDFECB2B637161400E5DE /* TextPDFExportOptions.swift in Sources */,
 				0F66DE5CDBB3BC3B4B88CB92 /* TextPDFExportService.swift in Sources */,
 				EBA7D3C655AA4A6A8B8B0001 /* EPUBExportService.swift in Sources */,

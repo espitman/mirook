@@ -95,8 +95,8 @@ struct TranslationInspectorView: View {
                 .font(.headline)
                 .foregroundStyle(MirookTheme.ink)
 
-            if documentStore.document == nil {
-                Text("Open a PDF to choose pages.")
+            if !documentStore.hasOpenDocument {
+                Text("Open a book to choose pages.")
                     .foregroundStyle(MirookTheme.mutedInk)
             } else {
                 HStack(spacing: 10) {
@@ -142,7 +142,7 @@ struct TranslationInspectorView: View {
 
     @ViewBuilder
     private var translationControls: some View {
-        if documentStore.document != nil {
+        if documentStore.hasOpenDocument {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Translate")
                     .font(.headline)
@@ -396,7 +396,7 @@ struct TranslationInspectorView: View {
 
     @ViewBuilder
     private var exportControls: some View {
-        if documentStore.document != nil {
+        if documentStore.hasOpenDocument {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Export")
                     .font(.headline)

@@ -12,11 +12,11 @@ struct EmptyReaderState: View {
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .shadow(color: MirookTheme.shadow, radius: 18, y: 8)
 
-            Text("Open a PDF to begin")
+            Text("Open a book to begin")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(MirookTheme.ink)
 
-            Text("Mirook will show the document here before translation.")
+            Text("Mirook will show the source book here before translation.")
                 .font(.subheadline)
                 .foregroundStyle(MirookTheme.mutedInk)
         }

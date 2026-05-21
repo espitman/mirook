@@ -6,8 +6,16 @@ import SQLite3
 
 struct TranslationProjectPackage {
     let manifest: TranslationProjectManifest
-    let pdfData: Data
+    let sourceData: Data
     let bookURL: URL
+
+    var sourceKind: SourceDocumentKind {
+        manifest.sourceKind
+    }
+
+    var pdfData: Data? {
+        manifest.sourceKind == .pdf ? sourceData : nil
+    }
 }
 
 final class TranslationProjectStore {
@@ -34,6 +42,7 @@ final class TranslationProjectStore {
         sourceURL: URL,
         displayName: String,
         pageCount: Int,
+        sourceKind: SourceDocumentKind = .pdf,
         targetLanguage: String,
         model: String
     ) throws -> TranslationProjectManifest {
@@ -65,6 +74,7 @@ final class TranslationProjectStore {
             manifest.targetLanguage = targetLanguage
             manifest.model = model
             manifest.sourceFingerprint = sourceFingerprint
+            manifest.sourceKind = sourceKind
             manifest.updatedAt = now
         } else {
             manifest = TranslationProjectManifest(
@@ -75,13 +85,14 @@ final class TranslationProjectStore {
                 targetLanguage: targetLanguage,
                 model: model,
                 createdAt: now,
-                updatedAt: now
+                updatedAt: now,
+                sourceKind: sourceKind
             )
             manifest.sourceFingerprint = sourceFingerprint
         }
 
         try saveManifest(manifest, database: database, bookURL: bookURL)
-        try embedSourcePDFIfNeeded(projectID: manifest.id, sourceURL: sourceURL, sourceData: sourceData)
+        try embedSourceIfNeeded(projectID: manifest.id, sourceURL: sourceURL, sourceKind: sourceKind, sourceData: sourceData)
         rememberBookURL(bookURL, projectID: manifest.id)
         return manifest
     }
@@ -98,11 +109,11 @@ final class TranslationProjectStore {
         let manifest = try decoder.decode(TranslationProjectManifest.self, from: data)
         rememberBookURL(bookURL, projectID: manifest.id)
 
-        guard let pdfData = try embeddedPDFData(database: database, bookURL: bookURL, manifest: manifest) else {
-            throw TranslationProjectStoreError.missingEmbeddedPDF(displayName: manifest.displayName)
+        guard let sourceData = try embeddedSourceData(database: database, bookURL: bookURL, manifest: manifest) else {
+            throw TranslationProjectStoreError.missingEmbeddedSource(displayName: manifest.displayName, sourceKind: manifest.sourceKind)
         }
 
-        return TranslationProjectPackage(manifest: manifest, pdfData: pdfData, bookURL: bookURL)
+        return TranslationProjectPackage(manifest: manifest, sourceData: sourceData, bookURL: bookURL)
     }
 
     func loadPages(projectID: String) throws -> [Int: TranslatedTextPage] {
@@ -170,20 +181,26 @@ final class TranslationProjectStore {
     }
 
     func embedSourcePDFIfNeeded(projectID: String, sourceURL: URL) throws {
-        try embedSourcePDFIfNeeded(projectID: projectID, sourceURL: sourceURL, sourceData: nil)
+        try embedSourceIfNeeded(projectID: projectID, sourceURL: sourceURL, sourceKind: .pdf, sourceData: nil)
     }
 
-    private func embedSourcePDFIfNeeded(projectID: String, sourceURL: URL, sourceData: Data?) throws {
+    private func embedSourceIfNeeded(
+        projectID: String,
+        sourceURL: URL,
+        sourceKind: SourceDocumentKind,
+        sourceData: Data?
+    ) throws {
         let bookURL = try bookURL(projectID: projectID)
         let database = try MirookBookDatabase(url: bookURL)
         try requireUnlockedIfNeeded(database: database, bookURL: bookURL)
+        let sourceKey = metadataKey(for: sourceKind)
 
-        if try loadMetadataPayload(key: MetadataKey.sourcePDF, database: database, bookURL: bookURL) != nil {
+        if try loadMetadataPayload(key: sourceKey, database: database, bookURL: bookURL) != nil {
             return
         }
 
         let data = try sourceData ?? Data(contentsOf: sourceURL)
-        try saveMetadataPayload(data, key: MetadataKey.sourcePDF, database: database, bookURL: bookURL)
+        try saveMetadataPayload(data, key: sourceKey, database: database, bookURL: bookURL)
     }
 
     func projectDirectoryURL(projectID: String) throws -> URL {
@@ -285,6 +302,7 @@ final class TranslationProjectStore {
         static let manifest = "manifest"
         static let exportOptions = "exportOptions"
         static let sourcePDF = "sourcePDF"
+        static let sourceEPUB = "sourceEPUB"
     }
 
     private enum InfoKey {
@@ -294,6 +312,7 @@ final class TranslationProjectStore {
         static let pageCount = "pageCount"
         static let sourcePath = "sourcePath"
         static let sourceFingerprint = "sourceFingerprint"
+        static let sourceKind = "sourceKind"
     }
 
     private struct PayloadSnapshot {
@@ -315,6 +334,15 @@ final class TranslationProjectStore {
     private func projectID(sourceFingerprint: String, pageCount: Int) -> String {
         let digest = SHA256.hash(data: Data("\(sourceFingerprint)|\(pageCount)".utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func metadataKey(for sourceKind: SourceDocumentKind) -> String {
+        switch sourceKind {
+        case .pdf:
+            MetadataKey.sourcePDF
+        case .epub:
+            MetadataKey.sourceEPUB
+        }
     }
 
     private func fingerprint(for data: Data) -> String {
@@ -458,17 +486,20 @@ final class TranslationProjectStore {
                 continue
             }
 
-            if let metadataData = try? database.loadMetadataJSONData(key: MetadataKey.sourcePDF),
-               fingerprint(for: metadataData) == sourceFingerprint {
-                try? database.saveInfoText(sourceFingerprint, key: InfoKey.sourceFingerprint)
+            for sourceKind in [SourceDocumentKind.pdf, .epub] {
+                if let metadataData = try? database.loadMetadataJSONData(key: metadataKey(for: sourceKind)),
+                   fingerprint(for: metadataData) == sourceFingerprint {
+                    try? database.saveInfoText(sourceFingerprint, key: InfoKey.sourceFingerprint)
 
-                if let manifestData = try? database.loadMetadataJSONData(key: MetadataKey.manifest),
-                   var manifest = try? decoder.decode(TranslationProjectManifest.self, from: manifestData) {
-                    manifest.sourceFingerprint = sourceFingerprint
-                    try? saveManifest(manifest, database: database, bookURL: bookURL)
+                    if let manifestData = try? database.loadMetadataJSONData(key: MetadataKey.manifest),
+                       var manifest = try? decoder.decode(TranslationProjectManifest.self, from: manifestData) {
+                        manifest.sourceFingerprint = sourceFingerprint
+                        manifest.sourceKind = sourceKind
+                        try? saveManifest(manifest, database: database, bookURL: bookURL)
+                    }
+
+                    return bookURL
                 }
-
-                return bookURL
             }
 
             if let manifestData = try? database.loadMetadataJSONData(key: MetadataKey.manifest),
@@ -513,6 +544,7 @@ final class TranslationProjectStore {
         try database.saveInfoText(manifest.displayName, key: InfoKey.displayName)
         try database.saveInfoText("\(manifest.pageCount)", key: InfoKey.pageCount)
         try database.saveInfoText(manifest.sourcePath, key: InfoKey.sourcePath)
+        try database.saveInfoText(manifest.sourceKind.rawValue, key: InfoKey.sourceKind)
         if let sourceFingerprint = manifest.sourceFingerprint {
             try database.saveInfoText(sourceFingerprint, key: InfoKey.sourceFingerprint)
         }
@@ -673,12 +705,12 @@ final class TranslationProjectStore {
         return try decoder.decode(BookEncryptionMetadata.self, from: data)
     }
 
-    private func embeddedPDFData(
+    private func embeddedSourceData(
         database: MirookBookDatabase,
         bookURL: URL,
         manifest: TranslationProjectManifest
     ) throws -> Data? {
-        if let data = try loadMetadataPayload(key: MetadataKey.sourcePDF, database: database, bookURL: bookURL) {
+        if let data = try loadMetadataPayload(key: metadataKey(for: manifest.sourceKind), database: database, bookURL: bookURL) {
             return data
         }
 
@@ -688,7 +720,7 @@ final class TranslationProjectStore {
         }
 
         let data = try Data(contentsOf: sourceURL)
-        try saveMetadataPayload(data, key: MetadataKey.sourcePDF, database: database, bookURL: bookURL)
+        try saveMetadataPayload(data, key: metadataKey(for: manifest.sourceKind), database: database, bookURL: bookURL)
         return data
     }
 
@@ -726,8 +758,8 @@ final class TranslationProjectStore {
                 continue
             }
 
-            if let sourcePDFData = try database.loadMetadataJSONData(key: MetadataKey.sourcePDF) {
-                let sourceFingerprint = fingerprint(for: sourcePDFData)
+            if let sourceData = try database.loadMetadataJSONData(key: metadataKey(for: manifest.sourceKind)) {
+                let sourceFingerprint = fingerprint(for: sourceData)
                 if manifest.sourceFingerprint != sourceFingerprint {
                     manifest.sourceFingerprint = sourceFingerprint
                     try database.saveMetadataJSONData(try encoder.encode(manifest), key: MetadataKey.manifest)
@@ -945,7 +977,7 @@ enum TranslationProjectStoreError: LocalizedError {
     case invalidPassword
     case emptyPassword
     case bookAlreadyLocked
-    case missingEmbeddedPDF(displayName: String)
+    case missingEmbeddedSource(displayName: String, sourceKind: SourceDocumentKind)
     case crypto(message: String)
     case sqlite(message: String)
 
@@ -963,8 +995,8 @@ enum TranslationProjectStoreError: LocalizedError {
             "Password cannot be empty."
         case .bookAlreadyLocked:
             "This book already has a password."
-        case let .missingEmbeddedPDF(displayName):
-            "The original PDF is not embedded in \(displayName), and the old source file could not be found."
+        case let .missingEmbeddedSource(displayName, sourceKind):
+            "The original \(sourceKind.displayName) is not embedded in \(displayName), and the old source file could not be found."
         case let .crypto(message):
             "Mirook encryption error: \(message)"
         case let .sqlite(message):
