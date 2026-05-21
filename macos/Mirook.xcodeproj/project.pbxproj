@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0F66DE5CDBB3BC3B4B88CB92 /* TextPDFExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBADB17FDF00F53D4FDCAD64 /* TextPDFExportService.swift */; };
+		EBA7D3C655AA4A6A8B8B0001 /* EPUBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBA7D3C655AA4A6A8B8B0002 /* EPUBExportService.swift */; };
 		1C09C63E874FDD91342A9187 /* TranslatedPageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */; };
 		257C0CF1917396D5865B371E /* Vazirmatn-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D0CBE83280A9B4215A3D46D1 /* Vazirmatn-Regular.ttf */; };
 		25FBDFECB2B637161400E5DE /* TextPDFExportOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6AD4F39194C5622544728E5 /* TextPDFExportOptions.swift */; };
@@ -68,6 +69,7 @@
 		D0CBE83280A9B4215A3D46D1 /* Vazirmatn-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Vazirmatn-Regular.ttf"; sourceTree = "<group>"; };
 		D63DB68AF9F02B13CAB3B97E /* PDFKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFKitView.swift; sourceTree = "<group>"; };
 		DBADB17FDF00F53D4FDCAD64 /* TextPDFExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPDFExportService.swift; sourceTree = "<group>"; };
+		EBA7D3C655AA4A6A8B8B0002 /* EPUBExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBExportService.swift; sourceTree = "<group>"; };
 		E052837188A7F7E8EB65327C /* Vazirmatn-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Vazirmatn-Bold.ttf"; sourceTree = "<group>"; };
 		E4A318F86014A8807A2C59C5 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		F32EE4ACE28692F3AE139263 /* TranslationProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationProjectStore.swift; sourceTree = "<group>"; };
@@ -86,6 +88,7 @@
 				B8966EA9E4EABDA935373EBF /* PDFPageRenderer.swift */,
 				FF2E65E0C8D26472EB824216 /* PersianTextLayoutEngine.swift */,
 				DBADB17FDF00F53D4FDCAD64 /* TextPDFExportService.swift */,
+				EBA7D3C655AA4A6A8B8B0002 /* EPUBExportService.swift */,
 				83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */,
 				F32EE4ACE28692F3AE139263 /* TranslationProjectStore.swift */,
 			);
@@ -262,6 +265,7 @@
 				BF1229038AF58C56719A26CA /* SidebarView.swift in Sources */,
 				25FBDFECB2B637161400E5DE /* TextPDFExportOptions.swift in Sources */,
 				0F66DE5CDBB3BC3B4B88CB92 /* TextPDFExportService.swift in Sources */,
+				EBA7D3C655AA4A6A8B8B0001 /* EPUBExportService.swift in Sources */,
 				1C09C63E874FDD91342A9187 /* TranslatedPageRenderer.swift in Sources */,
 				33F9F24079CAFD9BC49F091C /* TranslatedRenderedPage.swift in Sources */,
 				2B75F930F910F322C59EB9AA /* TranslatedTextPage.swift in Sources */,

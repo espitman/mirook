@@ -705,9 +705,19 @@ private struct ReadingModeView: View {
 
     private func translatedTextView(_ text: String) -> some View {
         ReadingModeRTLTextView(
-            text: text,
+            text: normalizedReadingText(text),
             fontSize: CGFloat(readingModeTranslationFontSize)
         )
+    }
+
+    private func normalizedReadingText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
     }
 
     private func adjustTranslationFontSize(by delta: Double) {
@@ -818,8 +828,8 @@ private struct ReadingModeRTLTextView: NSViewRepresentable {
         paragraphStyle.alignment = .right
         paragraphStyle.baseWritingDirection = .rightToLeft
         paragraphStyle.lineBreakMode = .byWordWrapping
-        paragraphStyle.lineSpacing = 8
-        paragraphStyle.paragraphSpacing = 10
+        paragraphStyle.lineSpacing = 3
+        paragraphStyle.paragraphSpacing = 4
 
         return NSAttributedString(
             string: text,

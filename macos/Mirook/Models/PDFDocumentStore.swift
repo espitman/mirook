@@ -114,8 +114,10 @@ final class PDFDocumentStore: ObservableObject {
     @Published private(set) var textTranslationProgressPageNumber: Int?
     @Published private(set) var isExportingPDF = false
     @Published private(set) var isExportingTextPDF = false
+    @Published private(set) var isExportingEPUB = false
     @Published private(set) var lastExportedPDFURL: URL?
     @Published private(set) var lastExportedTextPDFURL: URL?
+    @Published private(set) var lastExportedEPUBURL: URL?
     @Published private(set) var currentTranslationProject: TranslationProjectManifest?
     @Published private(set) var isCurrentBookPasswordProtected = false
     @Published private(set) var availableAIModels: [AIModelInfo] = []
@@ -129,6 +131,7 @@ final class PDFDocumentStore: ObservableObject {
     private let translatedPageRenderer = TranslatedPageRenderer()
     private let pdfExportService = PDFExportService()
     private let textPDFExportService = TextPDFExportService()
+    private let epubExportService = EPUBExportService()
     private let translationProjectStore = TranslationProjectStore()
     private let keychainService = KeychainService()
     private static let currentParagraphLayoutVersion = 3
@@ -526,6 +529,7 @@ final class PDFDocumentStore: ObservableObject {
         translatedTextPage = nil
         lastExportedPDFURL = nil
         lastExportedTextPDFURL = nil
+        lastExportedEPUBURL = nil
         lastErrorMessage = nil
 
         currentTranslationProject = project
@@ -913,6 +917,45 @@ final class PDFDocumentStore: ObservableObject {
                 options: options
             )
             lastExportedTextPDFURL = url
+            lastErrorMessage = nil
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func exportTextTranslatedEPUB(options: TextPDFExportOptions = .default) {
+        guard !translatedTextPagesByIndex.isEmpty else {
+            lastErrorMessage = EPUBExportServiceError.noPages.localizedDescription
+            return
+        }
+
+        let epubType = UTType(filenameExtension: "epub") ?? .data
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [epubType]
+        savePanel.canCreateDirectories = true
+        savePanel.isExtensionHidden = false
+        savePanel.nameFieldStringValue = "\(displayName)-translated.epub"
+
+        guard savePanel.runModal() == .OK, let url = savePanel.url else {
+            return
+        }
+
+        isExportingEPUB = true
+        defer { isExportingEPUB = false }
+
+        do {
+            if let currentTranslationProject {
+                try translationProjectStore.saveExportOptions(options, projectID: currentTranslationProject.id)
+            }
+
+            let pages = Array(translatedTextPagesByIndex.values)
+            try epubExportService.export(
+                pages: pages,
+                displayName: displayName,
+                to: url,
+                options: options
+            )
+            lastExportedEPUBURL = url
             lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription

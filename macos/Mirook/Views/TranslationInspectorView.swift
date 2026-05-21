@@ -428,10 +428,22 @@ struct TranslationInspectorView: View {
                 .buttonStyle(MirookSecondaryButtonStyle())
                 .disabled(documentStore.translatedTextExportPageCount == 0 || documentStore.isExportingTextPDF)
 
+                Button {
+                    documentStore.exportTextTranslatedEPUB(options: textPDFExportOptions)
+                } label: {
+                    Label("Export EPUB", systemImage: "book.pages")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(MirookSecondaryButtonStyle())
+                .disabled(documentStore.translatedTextExportPageCount == 0 || documentStore.isExportingEPUB)
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text(documentStore.translatedTextCoverageDescription)
                     if let url = documentStore.lastExportedTextPDFURL {
-                        Text("Saved: \(url.lastPathComponent)")
+                        Text("PDF: \(url.lastPathComponent)")
+                    }
+                    if let url = documentStore.lastExportedEPUBURL {
+                        Text("EPUB: \(url.lastPathComponent)")
                     }
                 }
                 .font(.caption)
