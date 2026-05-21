@@ -57,6 +57,7 @@
 		83C5D4E07A0633DE33C42875 /* TranslatedPageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedPageRenderer.swift; sourceTree = "<group>"; };
 		85D9C58CBAAC8D1E4C2EE5AD /* TranslatedTextPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatedTextPage.swift; sourceTree = "<group>"; };
 		86900D65378F40B13CD9EBDF /* EmptyReaderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyReaderState.swift; sourceTree = "<group>"; };
+		8C477C25C51247C59812D85F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		94A91FA09881EE7790A589CD /* PDFPageSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPageSelection.swift; sourceTree = "<group>"; };
 		970722C082B20727DE683EE3 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		ACB83DA844EDBDECF0D03691 /* MirookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MirookApp.swift; sourceTree = "<group>"; };
@@ -135,6 +136,7 @@
 			isa = PBXGroup;
 			children = (
 				726EC6286C625CA612D58DDF /* Assets.xcassets */,
+				8C477C25C51247C59812D85F /* Info.plist */,
 				ACB83DA844EDBDECF0D03691 /* MirookApp.swift */,
 				52584F6686D8EAF90527F802 /* Models */,
 				89CE92775D5F2690B0202E81 /* Resources */,
@@ -278,9 +280,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = Mirook;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_FILE = Mirook/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -352,9 +355,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = Mirook;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_FILE = Mirook/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

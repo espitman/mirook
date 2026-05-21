@@ -7,6 +7,10 @@ struct MainWindowView: View {
 
     var body: some View {
         ZStack {
+            FullSizeWindowOnOpen()
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+
             if documentStore.isReadingMode, documentStore.document != nil {
                 ReadingModeView()
             } else {
@@ -33,6 +37,24 @@ struct MainWindowView: View {
 
             FileDropOverlay { url in
                 documentStore.openDroppedDocument(from: url)
+            }
+
+            if let dialog = documentStore.bookPasswordDialog {
+                BookPasswordDialogView(
+                    dialog: dialog,
+                    errorMessage: documentStore.bookPasswordDialogErrorMessage,
+                    onSubmit: { currentPassword, newPassword, confirmPassword in
+                        documentStore.submitBookPasswordDialog(
+                            currentPassword: currentPassword,
+                            newPassword: newPassword,
+                            confirmPassword: confirmPassword
+                        )
+                    },
+                    onCancel: {
+                        documentStore.cancelBookPasswordDialog()
+                    }
+                )
+                .zIndex(10)
             }
         }
         .background(MirookTheme.appBackground)
@@ -105,6 +127,225 @@ struct MainWindowView: View {
         }
 
         return false
+    }
+}
+
+private struct FullSizeWindowOnOpen: NSViewRepresentable {
+    func makeNSView(context: Context) -> FullSizeWindowView {
+        FullSizeWindowView()
+    }
+
+    func updateNSView(_ view: FullSizeWindowView, context: Context) {
+        view.sizeWindowIfNeeded()
+    }
+}
+
+private final class FullSizeWindowView: NSView {
+    private var didSizeWindow = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        sizeWindowIfNeeded()
+    }
+
+    func sizeWindowIfNeeded() {
+        guard !didSizeWindow else { return }
+
+        DispatchQueue.main.async { [weak self] in
+            guard
+                let self,
+                !self.didSizeWindow,
+                let window = self.window,
+                let frame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            else {
+                return
+            }
+
+            self.didSizeWindow = true
+            window.setFrame(frame, display: true, animate: false)
+        }
+    }
+}
+
+private struct BookPasswordDialogView: View {
+    let dialog: BookPasswordDialog
+    let errorMessage: String?
+    let onSubmit: (String, String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case current
+        case new
+        case confirm
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.20)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image("MirookLogoMark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 58, height: 58)
+                    .frame(width: 82, height: 82)
+                    .background(MirookTheme.readerBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(MirookTheme.border, lineWidth: 1)
+                    }
+
+                VStack(spacing: 6) {
+                    Text(dialog.title)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(MirookTheme.ink)
+
+                    Text(dialog.displayName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(MirookTheme.mutedInk)
+                        .lineLimit(1)
+
+                    Text(dialog.message)
+                        .font(.subheadline)
+                        .foregroundStyle(MirookTheme.mutedInk)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 10) {
+                    if dialog.needsCurrentPassword {
+                        passwordField(
+                            title: dialog.mode == .unlock ? "Password" : "Current password",
+                            text: $currentPassword,
+                            focus: .current
+                        )
+                    }
+
+                    if dialog.needsNewPassword {
+                        passwordField(title: "New password", text: $newPassword, focus: .new)
+                        passwordField(title: "Confirm password", text: $confirmPassword, focus: .confirm)
+                    }
+                }
+
+                if let errorMessage {
+                    errorBanner(errorMessage)
+                }
+
+                actionButtons
+            }
+            .padding(22)
+            .frame(width: 420)
+            .background(MirookTheme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.75), lineWidth: 1)
+            }
+            .shadow(color: Color.black.opacity(0.22), radius: 28, y: 16)
+        }
+        .onAppear {
+            focusedField = dialog.needsCurrentPassword ? .current : .new
+        }
+        .onChange(of: dialog.id) {
+            currentPassword = ""
+            newPassword = ""
+            confirmPassword = ""
+            focusedField = dialog.needsCurrentPassword ? .current : .new
+        }
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 10) {
+            Button("Cancel") {
+                onCancel()
+            }
+            .buttonStyle(MirookSecondaryButtonStyle())
+            .keyboardShortcut(.cancelAction)
+            .frame(maxWidth: .infinity)
+
+            primaryButton
+        }
+    }
+
+    @ViewBuilder
+    private var primaryButton: some View {
+        if dialog.isDestructive {
+            Button(dialog.primaryButtonTitle) {
+                submit()
+            }
+            .buttonStyle(MirookDestructiveButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .frame(maxWidth: .infinity)
+        } else {
+            Button(dialog.primaryButtonTitle) {
+                submit()
+            }
+            .buttonStyle(MirookPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func passwordField(title: String, text: Binding<String>, focus: Field) -> some View {
+        SecureField(title, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(MirookTheme.ink)
+            .focused($focusedField, equals: focus)
+            .onSubmit(submit)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(MirookTheme.controlFill)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(focusedField == focus ? MirookTheme.ink.opacity(0.45) : MirookTheme.border, lineWidth: 1)
+            }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "exclamationmark.circle")
+            Text(message)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(Color(red: 0.74, green: 0.15, blue: 0.12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(red: 1.0, green: 0.92, blue: 0.89))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func submit() {
+        onSubmit(currentPassword, newPassword, confirmPassword)
+    }
+}
+
+private struct MirookDestructiveButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(isEnabled ? Color.white : MirookTheme.faintInk)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(isEnabled ? Color(red: 0.70, green: 0.12, blue: 0.10) : MirookTheme.disabledFill)
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.white.opacity(configuration.isPressed ? 0.24 : 0.10), lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.82 : 1)
     }
 }
 

@@ -8,6 +8,11 @@ struct MirookApp: App {
         WindowGroup {
             MainWindowView()
                 .environmentObject(documentStore)
+                .onOpenURL { url in
+                    Task { @MainActor in
+                        documentStore.openDroppedDocument(from: url)
+                    }
+                }
         }
         .windowStyle(.titleBar)
 

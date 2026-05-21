@@ -3,6 +3,80 @@ import Foundation
 import PDFKit
 import UniformTypeIdentifiers
 
+struct BookPasswordDialog: Identifiable, Equatable {
+    enum Mode: Equatable {
+        case set
+        case change
+        case remove
+        case unlock
+    }
+
+    let id = UUID()
+    let mode: Mode
+    let displayName: String
+
+    var title: String {
+        switch mode {
+        case .set:
+            "Set Book Password"
+        case .change:
+            "Change Book Password"
+        case .remove:
+            "Remove Book Password"
+        case .unlock:
+            "Unlock Book"
+        }
+    }
+
+    var message: String {
+        switch mode {
+        case .set:
+            "This password protects the embedded PDF and translations. It cannot be recovered if you forget it."
+        case .change:
+            "Enter the current password, then choose a new one."
+        case .remove:
+            "Enter the current password to remove protection from this book."
+        case .unlock:
+            "This Mirook book is password protected."
+        }
+    }
+
+    var primaryButtonTitle: String {
+        switch mode {
+        case .set:
+            "Set Password"
+        case .change:
+            "Change Password"
+        case .remove:
+            "Remove Password"
+        case .unlock:
+            "Unlock"
+        }
+    }
+
+    var needsCurrentPassword: Bool {
+        switch mode {
+        case .change, .remove, .unlock:
+            true
+        case .set:
+            false
+        }
+    }
+
+    var needsNewPassword: Bool {
+        switch mode {
+        case .set, .change:
+            true
+        case .remove, .unlock:
+            false
+        }
+    }
+
+    var isDestructive: Bool {
+        mode == .remove
+    }
+}
+
 @MainActor
 final class PDFDocumentStore: ObservableObject {
     @Published private(set) var document: PDFDocument?
@@ -47,6 +121,8 @@ final class PDFDocumentStore: ObservableObject {
     @Published private(set) var availableAIModels: [AIModelInfo] = []
     @Published private(set) var isLoadingAIModels = false
     @Published private(set) var lastTranslationUsage: AIUsage?
+    @Published private(set) var bookPasswordDialog: BookPasswordDialog?
+    @Published private(set) var bookPasswordDialogErrorMessage: String?
     @Published var lastErrorMessage: String?
 
     private let pageRenderer = PDFPageRenderer(scale: 2.0)
@@ -56,6 +132,14 @@ final class PDFDocumentStore: ObservableObject {
     private let translationProjectStore = TranslationProjectStore()
     private let keychainService = KeychainService()
     private static let currentParagraphLayoutVersion = 3
+    private var pendingPasswordDialogAction: PendingPasswordDialogAction?
+
+    private enum PendingPasswordDialogAction {
+        case set(projectID: String)
+        case change(projectID: String)
+        case remove(projectID: String)
+        case unlock(bookURL: URL, retry: () throws -> Void)
+    }
 
     private enum SettingsKey {
         static let openAIAPIKeyAccount = "openai-api-key"
@@ -200,8 +284,8 @@ final class PDFDocumentStore: ObservableObject {
         do {
             try openLoadedPDF(loadedDocument, sourceURL: url, displayName: url.deletingPathExtension().lastPathComponent)
         } catch let error as TranslationProjectStoreError {
-            handleOpenError(error) {
-                try openLoadedPDF(loadedDocument, sourceURL: url, displayName: url.deletingPathExtension().lastPathComponent)
+            handleOpenError(error) { [self] in
+                try self.openLoadedPDF(loadedDocument, sourceURL: url, displayName: url.deletingPathExtension().lastPathComponent)
             }
         } catch {
             resetProjectStateAfterOpenFailure()
@@ -230,13 +314,13 @@ final class PDFDocumentStore: ObservableObject {
 
             try openLoadedBook(loadedDocument, package: package)
         } catch let error as TranslationProjectStoreError {
-            handleOpenError(error) {
-                let package = try translationProjectStore.loadProject(fromBookURL: url)
+            handleOpenError(error) { [self] in
+                let package = try self.translationProjectStore.loadProject(fromBookURL: url)
                 guard let loadedDocument = PDFDocument(data: package.pdfData) else {
                     throw TranslationProjectStoreError.missingEmbeddedPDF(displayName: url.deletingPathExtension().lastPathComponent)
                 }
 
-                try openLoadedBook(loadedDocument, package: package)
+                try self.openLoadedBook(loadedDocument, package: package)
             }
         } catch {
             resetProjectStateAfterOpenFailure()
@@ -255,46 +339,131 @@ final class PDFDocumentStore: ObservableObject {
 
     func setCurrentBookPassword() {
         guard let currentTranslationProject else { return }
-        guard let password = promptForNewPassword(title: "Set Book Password") else { return }
-
-        do {
-            try translationProjectStore.setPassword(projectID: currentTranslationProject.id, password: password)
-            try refreshCurrentBookPasswordStatus()
-            lastErrorMessage = nil
-        } catch {
-            lastErrorMessage = error.localizedDescription
-        }
+        presentBookPasswordDialog(
+            .init(mode: .set, displayName: currentTranslationProject.displayName),
+            action: .set(projectID: currentTranslationProject.id)
+        )
     }
 
     func changeCurrentBookPassword() {
         guard let currentTranslationProject else { return }
-        guard let oldPassword = promptForPassword(title: "Current Password", message: "Enter the current password for this book.") else { return }
-        guard let newPassword = promptForNewPassword(title: "Change Book Password") else { return }
-
-        do {
-            try translationProjectStore.changePassword(
-                projectID: currentTranslationProject.id,
-                oldPassword: oldPassword,
-                newPassword: newPassword
-            )
-            try refreshCurrentBookPasswordStatus()
-            lastErrorMessage = nil
-        } catch {
-            lastErrorMessage = error.localizedDescription
-        }
+        presentBookPasswordDialog(
+            .init(mode: .change, displayName: currentTranslationProject.displayName),
+            action: .change(projectID: currentTranslationProject.id)
+        )
     }
 
     func removeCurrentBookPassword() {
         guard let currentTranslationProject else { return }
-        guard let password = promptForPassword(title: "Remove Book Password", message: "Enter the current password to remove protection.") else { return }
+        presentBookPasswordDialog(
+            .init(mode: .remove, displayName: currentTranslationProject.displayName),
+            action: .remove(projectID: currentTranslationProject.id)
+        )
+    }
 
+    func submitBookPasswordDialog(
+        currentPassword: String,
+        newPassword: String,
+        confirmPassword: String
+    ) {
+        guard let pendingPasswordDialogAction else { return }
+        bookPasswordDialogErrorMessage = nil
+
+        switch pendingPasswordDialogAction {
+        case let .set(projectID):
+            guard let password = validatedNewPassword(newPassword, confirmPassword: confirmPassword) else { return }
+            performPasswordDialogOperation {
+                try translationProjectStore.setPassword(projectID: projectID, password: password)
+                try refreshCurrentBookPasswordStatus()
+            }
+
+        case let .change(projectID):
+            guard let currentPassword = validatedCurrentPassword(currentPassword),
+                  let newPassword = validatedNewPassword(newPassword, confirmPassword: confirmPassword) else {
+                return
+            }
+            performPasswordDialogOperation {
+                try translationProjectStore.changePassword(
+                    projectID: projectID,
+                    oldPassword: currentPassword,
+                    newPassword: newPassword
+                )
+                try refreshCurrentBookPasswordStatus()
+            }
+
+        case let .remove(projectID):
+            guard let currentPassword = validatedCurrentPassword(currentPassword) else { return }
+            performPasswordDialogOperation {
+                try translationProjectStore.removePassword(projectID: projectID, password: currentPassword)
+                try refreshCurrentBookPasswordStatus()
+            }
+
+        case let .unlock(bookURL, retry):
+            guard let currentPassword = validatedCurrentPassword(currentPassword) else { return }
+            do {
+                try translationProjectStore.unlockBook(at: bookURL, password: currentPassword)
+                try retry()
+                closeBookPasswordDialog()
+                lastErrorMessage = nil
+            } catch {
+                bookPasswordDialogErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelBookPasswordDialog() {
+        if case .unlock = pendingPasswordDialogAction {
+            resetProjectStateAfterOpenFailure()
+        }
+
+        closeBookPasswordDialog()
+    }
+
+    private func performPasswordDialogOperation(_ operation: () throws -> Void) {
         do {
-            try translationProjectStore.removePassword(projectID: currentTranslationProject.id, password: password)
-            try refreshCurrentBookPasswordStatus()
+            try operation()
+            closeBookPasswordDialog()
             lastErrorMessage = nil
         } catch {
-            lastErrorMessage = error.localizedDescription
+            bookPasswordDialogErrorMessage = error.localizedDescription
         }
+    }
+
+    private func presentBookPasswordDialog(_ dialog: BookPasswordDialog, action: PendingPasswordDialogAction) {
+        pendingPasswordDialogAction = action
+        bookPasswordDialogErrorMessage = nil
+        bookPasswordDialog = dialog
+    }
+
+    private func closeBookPasswordDialog() {
+        bookPasswordDialog = nil
+        bookPasswordDialogErrorMessage = nil
+        pendingPasswordDialogAction = nil
+    }
+
+    private func validatedCurrentPassword(_ password: String) -> String? {
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPassword.isEmpty else {
+            bookPasswordDialogErrorMessage = "Password cannot be empty."
+            return nil
+        }
+
+        return password
+    }
+
+    private func validatedNewPassword(_ password: String, confirmPassword: String) -> String? {
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPassword.isEmpty else {
+            bookPasswordDialogErrorMessage = "Password cannot be empty."
+            return nil
+        }
+
+        guard password == confirmPassword else {
+            bookPasswordDialogErrorMessage = "Passwords do not match."
+            return nil
+        }
+
+        return password
     }
 
     private func openLoadedPDF(_ loadedDocument: PDFDocument, sourceURL: URL, displayName: String) throws {
@@ -367,28 +536,17 @@ final class PDFDocumentStore: ObservableObject {
         isCurrentBookPasswordProtected = false
     }
 
-    private func handleOpenError(_ error: TranslationProjectStoreError, retry: () throws -> Void) {
+    private func handleOpenError(_ error: TranslationProjectStoreError, retry: @escaping () throws -> Void) {
         guard case let .lockedBook(bookURL, displayName) = error else {
             resetProjectStateAfterOpenFailure()
             lastErrorMessage = error.localizedDescription
             return
         }
 
-        guard let password = promptForPassword(
-            title: "Unlock \(displayName)",
-            message: "Enter the password for this Mirook book."
-        ) else {
-            resetProjectStateAfterOpenFailure()
-            return
-        }
-
-        do {
-            try translationProjectStore.unlockBook(at: bookURL, password: password)
-            try retry()
-        } catch {
-            resetProjectStateAfterOpenFailure()
-            lastErrorMessage = error.localizedDescription
-        }
+        presentBookPasswordDialog(
+            .init(mode: .unlock, displayName: displayName),
+            action: .unlock(bookURL: bookURL, retry: retry)
+        )
     }
 
     private func refreshCurrentBookPasswordStatus() throws {
@@ -398,60 +556,6 @@ final class PDFDocumentStore: ObservableObject {
         }
 
         isCurrentBookPasswordProtected = try translationProjectStore.isPasswordProtected(projectID: currentTranslationProject.id)
-    }
-
-    private func promptForPassword(title: String, message: String) -> String? {
-        let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        passwordField.placeholderString = "Password"
-
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.accessoryView = passwordField
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else {
-            return nil
-        }
-
-        return passwordField.stringValue
-    }
-
-    private func promptForNewPassword(title: String) -> String? {
-        let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 28, width: 260, height: 24))
-        passwordField.placeholderString = "Password"
-        let confirmField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        confirmField.placeholderString = "Confirm password"
-
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
-        accessory.addSubview(passwordField)
-        accessory.addSubview(confirmField)
-
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = "This password cannot be recovered if you forget it."
-        alert.accessoryView = accessory
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else {
-            return nil
-        }
-
-        guard !passwordField.stringValue.isEmpty else {
-            lastErrorMessage = "Password cannot be empty."
-            return nil
-        }
-
-        guard passwordField.stringValue == confirmField.stringValue else {
-            lastErrorMessage = "Passwords do not match."
-            return nil
-        }
-
-        return passwordField.stringValue
     }
 
     func goToPreviousPage() {
