@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ReaderView: View {
     @EnvironmentObject private var documentStore: PDFDocumentStore
-    @State private var pageInput = "1"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,8 +27,13 @@ struct ReaderView: View {
             .background(MirookTheme.readerBackground)
         }
         .background(MirookTheme.panelBackground)
-        .onChange(of: documentStore.currentPageIndex) { _, newValue in
-            pageInput = "\(newValue + 1)"
+    }
+
+    private var pageNumberBinding: Binding<Int> {
+        Binding {
+            max(documentStore.currentPageNumber, 1)
+        } set: { newValue in
+            documentStore.goToPage(number: newValue)
         }
     }
 
@@ -67,10 +71,12 @@ struct ReaderView: View {
             .disabled(documentStore.currentPageIndex + 1 >= documentStore.pageCount)
 
             HStack(spacing: 6) {
-                TextField("Page", text: $pageInput)
+                MirookNumberField(
+                    placeholder: "Page",
+                    value: pageNumberBinding,
+                    range: 1...max(documentStore.pageCount, 1)
+                )
                     .frame(width: 54)
-                    .multilineTextAlignment(.center)
-                    .textFieldStyle(.plain)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .background(MirookTheme.controlFill)
@@ -78,9 +84,6 @@ struct ReaderView: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .stroke(MirookTheme.border, lineWidth: 1)
-                    }
-                    .onSubmit {
-                        documentStore.goToPage(number: Int(pageInput) ?? documentStore.currentPageNumber)
                     }
 
                 Text("of \(max(documentStore.pageCount, 1))")
@@ -90,6 +93,15 @@ struct ReaderView: View {
             .disabled(documentStore.document == nil)
 
             Spacer(minLength: 8)
+
+            Button {
+                documentStore.isReadingMode = true
+            } label: {
+                Image(systemName: "book")
+            }
+            .buttonStyle(MirookIconButtonStyle())
+            .help("Reading mode")
+            .disabled(documentStore.document == nil)
 
             Button {
                 documentStore.zoomOut()

@@ -23,6 +23,7 @@ final class PDFDocumentStore: ObservableObject {
     }
     @Published var zoomScale: CGFloat = 1.0
     @Published var pageSelection: PDFPageSelection = .firstPage
+    @Published var isReadingMode = false
     @Published private(set) var renderedPage: RenderedPage?
     @Published private(set) var isRenderingPage = false
     @Published private(set) var translatedPage: TranslatedPage?
@@ -198,6 +199,7 @@ final class PDFDocumentStore: ObservableObject {
         documentURL = url
         currentPageIndex = 0
         zoomScale = 1.0
+        isReadingMode = false
         pageSelection = .firstPage
         renderedPage = nil
         translatedPage = nil

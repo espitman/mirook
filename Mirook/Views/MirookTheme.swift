@@ -94,6 +94,136 @@ extension View {
     }
 }
 
+enum MirookDigitNormalizer {
+    static func normalizedIntegerText(_ text: String) -> String {
+        let mappedScalars = text.unicodeScalars.compactMap { scalar -> Character? in
+            switch scalar.value {
+            case 0x06F0...0x06F9:
+                return Character(String(scalar.value - 0x06F0))
+            case 0x0660...0x0669:
+                return Character(String(scalar.value - 0x0660))
+            case 48...57:
+                return Character(scalar)
+            default:
+                return nil
+            }
+        }
+
+        return String(mappedScalars)
+    }
+}
+
+struct MirookNumberField: NSViewRepresentable {
+    let placeholder: String
+    @Binding var value: Int
+    var range: ClosedRange<Int>
+    var step = 1
+    var alignment: NSTextAlignment = .center
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value, range: range, step: step)
+    }
+
+    func makeNSView(context: Context) -> NumberNSTextField {
+        let textField = NumberNSTextField()
+        textField.delegate = context.coordinator
+        textField.placeholderString = placeholder
+        textField.alignment = alignment
+        textField.isBezeled = false
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.font = .systemFont(ofSize: 15)
+        textField.lineBreakMode = .byClipping
+        textField.onStep = { direction in
+            context.coordinator.step(direction: direction)
+        }
+        textField.stringValue = "\(value)"
+        return textField
+    }
+
+    func updateNSView(_ textField: NumberNSTextField, context: Context) {
+        context.coordinator.value = $value
+        context.coordinator.range = range
+        context.coordinator.stepSize = step
+        textField.placeholderString = placeholder
+        textField.alignment = alignment
+        textField.onStep = { direction in
+            context.coordinator.step(direction: direction)
+        }
+
+        let valueText = "\(value)"
+        if textField.currentEditor() == nil, textField.stringValue != valueText {
+            textField.stringValue = valueText
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var value: Binding<Int>
+        var range: ClosedRange<Int>
+        var stepSize: Int
+
+        init(value: Binding<Int>, range: ClosedRange<Int>, step: Int) {
+            self.value = value
+            self.range = range
+            self.stepSize = step
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let textField = notification.object as? NSTextField else { return }
+            normalize(textField)
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let textField = notification.object as? NSTextField else { return }
+            textField.stringValue = "\(value.wrappedValue)"
+        }
+
+        func step(direction: Int) {
+            let delta = max(stepSize, 1) * direction
+            value.wrappedValue = clamped(value.wrappedValue + delta)
+        }
+
+        private func normalize(_ textField: NSTextField) {
+            let normalized = MirookDigitNormalizer.normalizedIntegerText(textField.stringValue)
+            if textField.stringValue != normalized {
+                let selectedRange = textField.currentEditor()?.selectedRange
+                textField.stringValue = normalized
+                if let selectedRange {
+                    let location = min(selectedRange.location, normalized.utf16.count)
+                    textField.currentEditor()?.selectedRange = NSRange(location: location, length: 0)
+                }
+            }
+
+            guard !normalized.isEmpty, let integerValue = Int(normalized) else {
+                return
+            }
+
+            value.wrappedValue = clamped(integerValue)
+        }
+
+        private func clamped(_ integerValue: Int) -> Int {
+            min(max(integerValue, range.lowerBound), range.upperBound)
+        }
+    }
+
+    final class NumberNSTextField: NSTextField {
+        var onStep: ((Int) -> Void)?
+
+        override func keyDown(with event: NSEvent) {
+            switch event.keyCode {
+            case 126:
+                onStep?(1)
+            case 125:
+                onStep?(-1)
+            default:
+                super.keyDown(with: event)
+            }
+        }
+    }
+}
+
 struct MirookPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 

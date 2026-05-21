@@ -6,6 +6,7 @@ struct PDFKitView: NSViewRepresentable {
     @Binding var currentPageIndex: Int
     @Binding var zoomScale: CGFloat
     let translatedTextPagesByIndex: [Int: TranslatedTextPage]
+    var allowsTranslationPopover = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -23,10 +24,12 @@ struct PDFKitView: NSViewRepresentable {
         pdfView.backgroundColor = NSColor(calibratedRed: 0.94, green: 0.92, blue: 0.88, alpha: 1)
         pdfView.document = document
         pdfView.onMouseClickedInView = { [weak coordinator = context.coordinator] point in
+            guard coordinator?.allowsTranslationPopover == true else { return }
             coordinator?.openTranslation(at: point)
         }
         pdfView.onMouseMovedInView = { [weak coordinator = context.coordinator] point in
-            coordinator?.hasTranslation(at: point) ?? false
+            guard coordinator?.allowsTranslationPopover == true else { return false }
+            return coordinator?.hasTranslation(at: point) ?? false
         }
         pdfView.onEscapePressed = { [weak coordinator = context.coordinator] in
             Task { @MainActor in
@@ -60,6 +63,10 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         context.coordinator.translatedTextPagesByIndex = translatedTextPagesByIndex
+        context.coordinator.allowsTranslationPopover = allowsTranslationPopover
+        if !allowsTranslationPopover {
+            context.coordinator.closeTranslationPopover()
+        }
     }
 
     static func dismantleNSView(_ nsView: PDFView, coordinator: Coordinator) {
@@ -72,6 +79,7 @@ struct PDFKitView: NSViewRepresentable {
     final class Coordinator: NSObject, PDFViewDelegate {
         @Binding private var currentPageIndex: Int
         var translatedTextPagesByIndex: [Int: TranslatedTextPage]
+        var allowsTranslationPopover = true
         weak var pdfView: PDFView?
         private var translationPopover: NSPopover?
         private weak var highlightedPage: PDFPage?

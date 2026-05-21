@@ -61,8 +61,11 @@ struct TranslationInspectorView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(MirookTheme.mutedInk)
 
-            TextField(title, value: value, format: .number)
-                .textFieldStyle(.plain)
+            MirookNumberField(
+                placeholder: title,
+                value: value,
+                range: 1...max(documentStore.pageCount, 1)
+            )
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .background(MirookTheme.controlFill)
