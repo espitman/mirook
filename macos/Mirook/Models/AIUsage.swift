@@ -36,12 +36,18 @@ struct AIUsage: Codable, Equatable {
             return nil
         }
 
-        let cost = providerReportedCost.formatted(.number.precision(.fractionLength(0...6)))
+        let cost = usesWholeUnitCost
+            ? providerReportedCost.formatted(.number.precision(.fractionLength(0)))
+            : providerReportedCost.formatted(.number.precision(.fractionLength(0...6)))
         if let costCurrency, !costCurrency.isEmpty {
             return "\(cost) \(costCurrency)"
         }
 
         return "\(cost) provider cost"
+    }
+
+    private var usesWholeUnitCost: Bool {
+        costCurrency?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "toman"
     }
 
     var displayText: String {

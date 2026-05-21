@@ -25,6 +25,10 @@ struct SidebarView: View {
                     }
                 }
 
+                if documentStore.hasOpenDocument {
+                    currentBookSummary
+                }
+
                 Button {
                     openDocument()
                 } label: {
@@ -36,20 +40,6 @@ struct SidebarView: View {
                 modelControls
 
                 if documentStore.hasOpenDocument {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Current Document")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(MirookTheme.mutedInk)
-                        Text(documentStore.displayName)
-                            .font(.headline)
-                            .foregroundStyle(MirookTheme.ink)
-                            .lineLimit(2)
-                        Text("\(documentStore.pageCount) pages")
-                            .font(.subheadline)
-                            .foregroundStyle(MirookTheme.mutedInk)
-                    }
-                    .mirookPanel()
-
                     usageSummary
                     bookFileControls
                 }
@@ -60,6 +50,69 @@ struct SidebarView: View {
             .padding(.top, 22)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    private var currentBookSummary: some View {
+        HStack(alignment: .top, spacing: 12) {
+            firstPagePreview
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Current Book")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(MirookTheme.mutedInk)
+
+                Text(documentStore.displayName)
+                    .font(.headline)
+                    .foregroundStyle(MirookTheme.ink)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(documentStore.sourceKindDisplayName)
+                    Text("\(documentStore.pageCount) pages")
+                    Text("Page 1 preview")
+                }
+                .font(.caption)
+                .foregroundStyle(MirookTheme.mutedInk)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .mirookPanel()
+    }
+
+    @ViewBuilder
+    private var firstPagePreview: some View {
+        if let image = firstPageThumbnail {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 68, height: 92)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(MirookTheme.border, lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+        } else if let page = documentStore.epubDocument?.pages.first {
+            EPUBFirstPagePreview(page: page)
+                .frame(width: 68, height: 92)
+        } else {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(MirookTheme.controlFill)
+                .frame(width: 68, height: 92)
+                .overlay {
+                    Image(systemName: "book.closed")
+                        .foregroundStyle(MirookTheme.mutedInk)
+                }
+        }
+    }
+
+    private var firstPageThumbnail: NSImage? {
+        guard let page = documentStore.document?.page(at: 0) else {
+            return nil
+        }
+        return page.thumbnail(of: NSSize(width: 136, height: 184), for: .cropBox)
     }
 
     private var bookFileControls: some View {
@@ -221,5 +274,87 @@ struct SidebarView: View {
                 documentStore.openPDF(from: url)
             }
         }
+    }
+}
+
+private struct EPUBFirstPagePreview: View {
+    let page: EPUBSourcePage
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(.white)
+
+            if let image = firstImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(5)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(previewLines, id: \.self) { line in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(MirookTheme.ink.opacity(lineOpacity(for: line)))
+                            .frame(width: lineWidth(for: line), height: 2.5)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(MirookTheme.border, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+    }
+
+    private var firstImage: NSImage? {
+        for block in page.blocks {
+            if case let .image(image) = block,
+               let nsImage = NSImage(data: image.data) {
+                return nsImage
+            }
+        }
+        return nil
+    }
+
+    private var previewLines: [String] {
+        let text = page.text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else {
+            return ["empty-1", "empty-2", "empty-3"]
+        }
+
+        var lines: [String] = []
+        var current = ""
+        for word in words.prefix(28) {
+            if current.count + word.count > 18 {
+                lines.append(current)
+                current = word
+            } else {
+                current = current.isEmpty ? word : "\(current) \(word)"
+            }
+        }
+        if !current.isEmpty {
+            lines.append(current)
+        }
+        return Array(lines.prefix(12))
+    }
+
+    private func lineWidth(for line: String) -> CGFloat {
+        if line.hasPrefix("empty-") {
+            return 42
+        }
+        let clamped = min(max(line.count, 5), 19)
+        return CGFloat(clamped) / 19 * 48
+    }
+
+    private func lineOpacity(for line: String) -> Double {
+        line.hasPrefix("empty-") ? 0.14 : 0.34
     }
 }
