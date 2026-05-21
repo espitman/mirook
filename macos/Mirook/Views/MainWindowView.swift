@@ -614,12 +614,16 @@ private struct ReadingModeView: View {
                     zoomScale: $documentStore.zoomScale,
                     translatedTextPagesByIndex: documentStore.translatedTextPagesByIndex,
                     allowsTranslationPopover: false,
+                    resetsScrollOnPageChange: true,
                     onFileDropped: { url in
                         documentStore.openDroppedDocument(from: url)
                     }
                 )
             } else if documentStore.epubDocument != nil {
-                EPUBSourceView(page: documentStore.currentEPUBPage)
+                EPUBSourceView(
+                    page: documentStore.currentEPUBPage,
+                    onLinkTapped: documentStore.openEPUBLink
+                )
             } else {
                 EmptyReaderState()
             }
@@ -636,7 +640,7 @@ private struct ReadingModeView: View {
                     if translatedTextPage.isBlank {
                         blankTranslationState
                     } else {
-                        translatedTextView(translatedTextPage.translatedText)
+                        translatedContentView(translatedTextPage)
                     }
                 } else {
                     missingTranslationState
@@ -723,11 +727,21 @@ private struct ReadingModeView: View {
         .background(MirookTheme.panelBackground)
     }
 
-    private func translatedTextView(_ text: String) -> some View {
-        ReadingModeRTLTextView(
-            text: normalizedReadingText(text),
-            fontSize: CGFloat(readingModeTranslationFontSize)
-        )
+    @ViewBuilder
+    private func translatedContentView(_ page: TranslatedTextPage) -> some View {
+        if let sourcePage = documentStore.currentEPUBPage {
+            ReadingModeEPUBTranslationView(
+                page: page,
+                sourcePage: sourcePage,
+                fontSize: CGFloat(readingModeTranslationFontSize),
+                onLinkTapped: documentStore.openEPUBLink
+            )
+        } else {
+            ReadingModeRTLTextView(
+                text: normalizedReadingText(page.translatedText),
+                fontSize: CGFloat(readingModeTranslationFontSize)
+            )
+        }
     }
 
     private func normalizedReadingText(_ text: String) -> String {
@@ -834,11 +848,15 @@ private struct ReadingModeRTLTextView: NSViewRepresentable {
         textView.setSelectedRange(NSRange(location: min(selectedRange.location, textLength), length: 0))
 
         if shouldResetScroll {
-            scrollView.contentView.scroll(to: .zero)
+            DispatchQueue.main.async {
+                textView.layoutSubtreeIfNeeded()
+                textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
         } else {
             scrollView.contentView.scroll(to: visibleOrigin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
-        scrollView.reflectScrolledClipView(scrollView.contentView)
 
         context.coordinator.lastText = text
     }
@@ -863,5 +881,355 @@ private struct ReadingModeRTLTextView: NSViewRepresentable {
 
     final class Coordinator {
         var lastText = ""
+    }
+}
+
+private struct ReadingModeRTLParagraphView: NSViewRepresentable {
+    let text: String
+    let fontSize: CGFloat
+    var foregroundColor: NSColor = .labelColor
+    var isUnderlined = false
+
+    func makeNSView(context: Context) -> AutoSizingRTLTextView {
+        let view = AutoSizingRTLTextView()
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateNSView(_ view: AutoSizingRTLTextView, context: Context) {
+        view.attributedText = Self.attributedString(
+            text: text,
+            fontSize: fontSize,
+            foregroundColor: foregroundColor,
+            isUnderlined: isUnderlined
+        )
+    }
+
+    private static func attributedString(
+        text: String,
+        fontSize: CGFloat,
+        foregroundColor: NSColor,
+        isUnderlined: Bool
+    ) -> NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .right
+        paragraphStyle.baseWritingDirection = .rightToLeft
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        paragraphStyle.lineSpacing = 3
+        paragraphStyle.paragraphSpacing = 0
+
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: MirookFontRegistrar.vazirmatnRegular(size: fontSize),
+            .foregroundColor: foregroundColor,
+            .paragraphStyle: paragraphStyle
+        ]
+        if isUnderlined {
+            attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+        }
+
+        return NSAttributedString(string: text, attributes: attributes)
+    }
+
+    final class AutoSizingRTLTextView: NSView {
+        private let textView = NSTextView()
+
+        var attributedText: NSAttributedString = NSAttributedString(string: "") {
+            didSet {
+                textView.textStorage?.setAttributedString(attributedText)
+                textView.setBaseWritingDirection(.rightToLeft, range: NSRange(location: 0, length: attributedText.length))
+                invalidateIntrinsicContentSize()
+                needsLayout = true
+            }
+        }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            setup()
+        }
+
+        private func setup() {
+            textView.isEditable = false
+            textView.isSelectable = true
+            textView.isRichText = true
+            textView.importsGraphics = false
+            textView.drawsBackground = false
+            textView.textContainerInset = .zero
+            textView.textContainer?.lineFragmentPadding = 0
+            textView.textContainer?.widthTracksTextView = true
+            textView.textContainer?.heightTracksTextView = false
+            textView.isHorizontallyResizable = false
+            textView.isVerticallyResizable = true
+            textView.alignment = .right
+            textView.baseWritingDirection = .rightToLeft
+            addSubview(textView)
+        }
+
+        override func layout() {
+            super.layout()
+            textView.frame = bounds
+            textView.textContainer?.containerSize = CGSize(width: max(bounds.width, 1), height: .greatestFiniteMagnitude)
+            invalidateIntrinsicContentSize()
+        }
+
+        override var intrinsicContentSize: NSSize {
+            let width = max(bounds.width, 1)
+            guard let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer else {
+                return NSSize(width: NSView.noIntrinsicMetric, height: 0)
+            }
+
+            textContainer.containerSize = CGSize(width: width, height: .greatestFiniteMagnitude)
+            layoutManager.ensureLayout(for: textContainer)
+            let usedRect = layoutManager.usedRect(for: textContainer)
+            return NSSize(width: NSView.noIntrinsicMetric, height: ceil(usedRect.height))
+        }
+    }
+}
+
+private struct ReadingModeEPUBTranslationView: View {
+    let page: TranslatedTextPage
+    let sourcePage: EPUBSourcePage
+    let fontSize: CGFloat
+    let onLinkTapped: (EPUBSourceLink) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .trailing, spacing: 14) {
+                Color.clear
+                    .frame(height: 0)
+                    .id("translation-top")
+
+                ForEach(Array(renderedBlocks.enumerated()), id: \.offset) { _, block in
+                    blockView(block)
+                }
+            }
+            .padding(.horizontal, 42)
+            .padding(.vertical, 46)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .id(sourcePage.id)
+        .background(MirookTheme.paperBackground)
+    }
+
+    private var renderedBlocks: [RenderedBlock] {
+        var paragraphs = normalizedParagraphs(page.translatedText)
+        var blocks: [RenderedBlock] = []
+        var previousSourceText = ""
+
+        for sourceBlock in displayBlocks(from: sourcePage.blocks) {
+            switch sourceBlock {
+            case let .text(sourceText):
+                guard !paragraphs.isEmpty else { continue }
+                blocks.append(.text(paragraphs.removeFirst()))
+                previousSourceText = sourceText
+            case let .link(link):
+                guard !paragraphs.isEmpty else { continue }
+                blocks.append(.link(text: paragraphs.removeFirst(), link: link))
+                previousSourceText = link.title
+            case let .image(image):
+                if let nextParagraph = paragraphs.first,
+                   shouldPlaceBeforeImage(nextParagraph, previousSourceText: previousSourceText) {
+                    blocks.append(.text(paragraphs.removeFirst()))
+                }
+                blocks.append(.image(image))
+            }
+        }
+
+        for paragraph in paragraphs {
+            blocks.append(.text(paragraph))
+        }
+
+        return blocks
+    }
+
+    private func shouldPlaceBeforeImage(_ translatedParagraph: String, previousSourceText: String) -> Bool {
+        let translated = translatedParagraph.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = previousSourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !translated.isEmpty, !source.isEmpty else {
+            return false
+        }
+
+        let sourceMentionsFigure = source.range(of: #"(?i)\b(fig\.?|figure|illustration)\b"#, options: .regularExpression) != nil
+        let translationMentionsFigure = translated.contains("شکل") ||
+            translated.range(of: #"(?i)\bfig\.?|figure\b"#, options: .regularExpression) != nil
+        return sourceMentionsFigure && translationMentionsFigure
+    }
+
+    private func displayBlocks(from blocks: [EPUBSourceBlock]) -> [EPUBSourceBlock] {
+        var result: [EPUBSourceBlock] = []
+        var index = 0
+
+        while index < blocks.count {
+            guard case let .text(text) = blocks[index] else {
+                result.append(blocks[index])
+                index += 1
+                continue
+            }
+
+            var mergedText = text
+            var nextIndex = index + 1
+            while nextIndex < blocks.count,
+                  case let .text(nextText) = blocks[nextIndex],
+                  shouldMergeTextFragment(current: mergedText, next: nextText) {
+                mergedText += "\n" + nextText
+                nextIndex += 1
+            }
+
+            result.append(.text(mergedText))
+            index = nextIndex
+        }
+
+        return result
+    }
+
+    private func shouldMergeTextFragment(current: String, next: String) -> Bool {
+        if shouldMergeTitleFragment(current: current, next: next) {
+            return true
+        }
+
+        let currentTrimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextTrimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !currentTrimmed.isEmpty, !nextTrimmed.isEmpty else {
+            return false
+        }
+        guard !endsSentence(currentTrimmed),
+              !isHeadingLike(currentTrimmed),
+              !startsNewListItem(nextTrimmed) else {
+            return false
+        }
+
+        return currentTrimmed.count >= 45 || startsWithContinuation(nextTrimmed)
+    }
+
+    private func shouldMergeTitleFragment(current: String, next: String) -> Bool {
+        let currentTrimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextTrimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard currentTrimmed.count <= 90,
+              nextTrimmed.count <= 60 else {
+            return false
+        }
+
+        return isTitleLike(currentTrimmed) && isTitleLike(nextTrimmed)
+    }
+
+    private func isTitleLike(_ text: String) -> Bool {
+        let letters = text.filter(\.isLetter)
+        guard !letters.isEmpty else { return false }
+        let uppercaseLetters = letters.filter(\.isUppercase)
+        if Double(uppercaseLetters.count) / Double(letters.count) >= 0.75 {
+            return true
+        }
+
+        return text.range(of: #"(?i)^\s*(chapter|part|section)\b"#, options: .regularExpression) != nil
+    }
+
+    private func isHeadingLike(_ text: String) -> Bool {
+        guard text.count <= 72,
+              !endsSentence(text),
+              !startsNewListItem(text) else {
+            return false
+        }
+
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        return wordCount <= 8
+    }
+
+    private func endsSentence(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
+            return false
+        }
+        return ".!?:;،؛؟。)»”]".contains(last)
+    }
+
+    private func startsNewListItem(_ text: String) -> Bool {
+        text.range(of: #"^\s*(?:[\u{2022}\-*•]|\d+[\.\)])\s+"#, options: .regularExpression) != nil
+    }
+
+    private func startsWithContinuation(_ text: String) -> Bool {
+        guard let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first else {
+            return false
+        }
+        return first.isLowercase || "،؛:;)]}»”".contains(first)
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: RenderedBlock) -> some View {
+        switch block {
+        case let .text(text):
+            ReadingModeRTLParagraphView(
+                text: text,
+                fontSize: fontSize
+            )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        case let .link(text, link):
+            Button {
+                onLinkTapped(link)
+            } label: {
+                ReadingModeRTLParagraphView(
+                    text: text,
+                    fontSize: fontSize,
+                    foregroundColor: .systemBlue,
+                    isUnderlined: true
+                )
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering in
+                if isHovering {
+                    NSCursor.pointingHand.set()
+                } else {
+                    NSCursor.arrow.set()
+                }
+            }
+            .help(link.url.absoluteString)
+        case let .image(image):
+            if let nsImage = NSImage(data: image.data) {
+                VStack(spacing: 8) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+
+                    if let altText = image.altText {
+                        Text(altText)
+                            .font(.caption)
+                            .foregroundStyle(MirookTheme.mutedInk)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.vertical, 8)
+            } else if let altText = image.altText {
+                Text(altText)
+                    .font(.caption)
+                    .foregroundStyle(MirookTheme.mutedInk)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    private func normalizedParagraphs(_ text: String) -> [String] {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private enum RenderedBlock {
+        case text(String)
+        case link(text: String, link: EPUBSourceLink)
+        case image(EPUBSourceImage)
     }
 }

@@ -23,7 +23,10 @@ struct ReaderView: View {
                         }
                     )
                 } else if documentStore.epubDocument != nil {
-                    EPUBSourceView(page: documentStore.currentEPUBPage)
+                    EPUBSourceView(
+                        page: documentStore.currentEPUBPage,
+                        onLinkTapped: documentStore.openEPUBLink
+                    )
                 } else {
                     EmptyReaderState()
                 }

@@ -710,6 +710,16 @@ final class PDFDocumentStore: ObservableObject {
         translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
     }
 
+    func openEPUBLink(_ link: EPUBSourceLink) {
+        if let targetPath = link.targetPath,
+           let targetPage = epubDocument?.pages.first(where: { $0.sourcePath == targetPath }) {
+            goToPage(number: targetPage.pageNumber)
+            return
+        }
+
+        NSWorkspace.shared.open(link.url)
+    }
+
     func goToLastTranslatedTextPage() {
         guard let pageNumber = lastTranslatedTextPageNumber else { return }
         goToPage(number: pageNumber)
@@ -1048,6 +1058,7 @@ final class PDFDocumentStore: ObservableObject {
                 pages: pages,
                 displayName: displayName,
                 to: url,
+                sourcePages: epubDocument?.pages,
                 options: options
             )
             lastExportedEPUBURL = url

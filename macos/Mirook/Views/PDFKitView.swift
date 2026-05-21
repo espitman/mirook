@@ -7,6 +7,7 @@ struct PDFKitView: NSViewRepresentable {
     @Binding var zoomScale: CGFloat
     let translatedTextPagesByIndex: [Int: TranslatedTextPage]
     var allowsTranslationPopover = true
+    var resetsScrollOnPageChange = false
     var onFileDropped: ((URL) -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -57,7 +58,16 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         if let targetPage = document.page(at: currentPageIndex), pdfView.currentPage !== targetPage {
-            pdfView.go(to: targetPage)
+            if resetsScrollOnPageChange {
+                let bounds = targetPage.bounds(for: pdfView.displayBox)
+                let destination = PDFDestination(
+                    page: targetPage,
+                    at: NSPoint(x: bounds.minX, y: bounds.maxY)
+                )
+                pdfView.go(to: destination)
+            } else {
+                pdfView.go(to: targetPage)
+            }
         }
 
         if abs(pdfView.scaleFactor - zoomScale) > 0.01 {

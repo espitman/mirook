@@ -22,6 +22,7 @@ struct EPUBExportService {
         pages: [TranslatedTextPage],
         displayName: String,
         to url: URL,
+        sourcePages: [EPUBSourcePage]? = nil,
         options: TextPDFExportOptions = .default
     ) throws {
         let sortedPages = pages.sorted { $0.pageIndex < $1.pageIndex }
@@ -41,24 +42,35 @@ struct EPUBExportService {
             entries.append(ZIPEntry(path: "OEBPS/Fonts/Vazirmatn-Bold.ttf", data: boldFont))
         }
 
+        var imageAssets: [EPUBImageAsset] = []
+        if let sourcePages {
+            imageAssets = imageAssetsForExport(from: sourcePages)
+            for asset in imageAssets {
+                entries.append(ZIPEntry(path: "OEBPS/\(asset.href)", data: asset.image.data))
+            }
+        }
+
+        let imageAssetsBySourcePath = Dictionary(uniqueKeysWithValues: imageAssets.map { ($0.image.path, $0) })
+
         let pageItems = sortedPages.map { page in
             EPUBPageItem(
                 id: "page-\(String(format: "%04d", page.pageNumber))",
                 href: "Text/page-\(String(format: "%04d", page.pageNumber)).xhtml",
                 label: "Page \(page.pageNumber)",
-                page: page
+                page: page,
+                sourcePage: sourcePage(at: page.pageIndex, in: sourcePages)
             )
         }
 
         entries.append(ZIPEntry(path: "OEBPS/nav.xhtml", data: Data(navXHTML(title: displayName, pages: pageItems).utf8)))
         entries.append(ZIPEntry(path: "OEBPS/toc.ncx", data: Data(tocNCX(title: displayName, pages: pageItems).utf8)))
-        entries.append(ZIPEntry(path: "OEBPS/package.opf", data: Data(packageOPF(title: displayName, pages: pageItems).utf8)))
+        entries.append(ZIPEntry(path: "OEBPS/package.opf", data: Data(packageOPF(title: displayName, pages: pageItems, imageAssets: imageAssets).utf8)))
 
         for item in pageItems {
             entries.append(
                 ZIPEntry(
                     path: "OEBPS/\(item.href)",
-                    data: Data(pageXHTML(title: item.label, page: item.page).utf8)
+                    data: Data(pageXHTML(title: item.label, page: item.page, sourcePage: item.sourcePage, imageAssetsBySourcePath: imageAssetsBySourcePath).utf8)
                 )
             )
         }
@@ -83,11 +95,14 @@ struct EPUBExportService {
         """
     }
 
-    private func packageOPF(title: String, pages: [EPUBPageItem]) -> String {
+    private func packageOPF(title: String, pages: [EPUBPageItem], imageAssets: [EPUBImageAsset]) -> String {
         let modified = ISO8601DateFormatter().string(from: Date())
         let escapedTitle = escapeXML(title)
         let pageManifest = pages.map {
             #"    <item id="\#($0.id)" href="\#($0.href)" media-type="application/xhtml+xml"/>"#
+        }.joined(separator: "\n")
+        let imageManifest = imageAssets.map {
+            #"    <item id="\#($0.id)" href="\#($0.href)" media-type="\#($0.image.mimeType)"/>"#
         }.joined(separator: "\n")
         let spine = pages.map {
             #"    <itemref idref="\#($0.id)"/>"#
@@ -108,6 +123,7 @@ struct EPUBExportService {
             <item id="css" href="Styles/book.css" media-type="text/css"/>
             <item id="vazirmatn-regular" href="Fonts/Vazirmatn-Regular.ttf" media-type="font/ttf"/>
             <item id="vazirmatn-bold" href="Fonts/Vazirmatn-Bold.ttf" media-type="font/ttf"/>
+        \(imageManifest)
         \(pageManifest)
           </manifest>
           <spine toc="ncx" page-progression-direction="rtl">
@@ -170,11 +186,13 @@ struct EPUBExportService {
         """
     }
 
-    private func pageXHTML(title: String, page: TranslatedTextPage) -> String {
-        let body = paragraphs(for: page).map { paragraph in
-            let className = className(for: paragraph.role)
-            return #"    <p class="\#(className)">\#(escapeXML(paragraph.text))</p>"#
-        }.joined(separator: "\n")
+    private func pageXHTML(
+        title: String,
+        page: TranslatedTextPage,
+        sourcePage: EPUBSourcePage?,
+        imageAssetsBySourcePath: [String: EPUBImageAsset]
+    ) -> String {
+        let body = pageBody(page: page, sourcePage: sourcePage, imageAssetsBySourcePath: imageAssetsBySourcePath)
         let pageBody = body.isEmpty ? #"    <div class="blank-page" aria-label="Blank page"></div>"# : body
 
         return """
@@ -192,6 +210,164 @@ struct EPUBExportService {
         </body>
         </html>
         """
+    }
+
+    private func pageBody(
+        page: TranslatedTextPage,
+        sourcePage: EPUBSourcePage?,
+        imageAssetsBySourcePath: [String: EPUBImageAsset]
+    ) -> String {
+        guard let sourcePage else {
+            return paragraphs(for: page).map { paragraph in
+                let className = className(for: paragraph.role)
+                return #"    <p class="\#(className)">\#(escapeXML(paragraph.text))</p>"#
+            }.joined(separator: "\n")
+        }
+
+        var translatedParagraphs = fallbackParagraphs(from: page.translatedText)
+        var bodyLines: [String] = []
+        var previousSourceText = ""
+
+        for block in displayBlocks(from: sourcePage.blocks) {
+            switch block {
+            case let .text(sourceText):
+                guard !translatedParagraphs.isEmpty else { continue }
+                let paragraph = translatedParagraphs.removeFirst()
+                bodyLines.append(#"    <p class="paragraph">\#(escapeXML(paragraph))</p>"#)
+                previousSourceText = sourceText
+            case let .link(link):
+                guard !translatedParagraphs.isEmpty else { continue }
+                let paragraph = translatedParagraphs.removeFirst()
+                let href = epubHref(for: link)
+                bodyLines.append(#"    <p class="paragraph"><a href="\#(escapeXMLAttribute(href))">\#(escapeXML(paragraph))</a></p>"#)
+                previousSourceText = link.title
+            case let .image(image):
+                if let nextParagraph = translatedParagraphs.first,
+                   shouldPlaceBeforeImage(nextParagraph, previousSourceText: previousSourceText) {
+                    let paragraph = translatedParagraphs.removeFirst()
+                    bodyLines.append(#"    <p class="paragraph">\#(escapeXML(paragraph))</p>"#)
+                }
+                guard let asset = imageAssetsBySourcePath[image.path] else { continue }
+                let alt = escapeXMLAttribute(image.altText ?? "")
+                bodyLines.append(#"    <figure class="source-image"><img src="../\#(escapeXMLAttribute(asset.href))" alt="\#(alt)"/></figure>"#)
+            }
+        }
+
+        for paragraph in translatedParagraphs {
+            bodyLines.append(#"    <p class="paragraph">\#(escapeXML(paragraph))</p>"#)
+        }
+
+        return bodyLines.joined(separator: "\n")
+    }
+
+    private func shouldPlaceBeforeImage(_ translatedParagraph: String, previousSourceText: String) -> Bool {
+        let translated = translatedParagraph.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = previousSourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !translated.isEmpty, !source.isEmpty else {
+            return false
+        }
+
+        let sourceMentionsFigure = source.range(of: #"(?i)\b(fig\.?|figure|illustration)\b"#, options: .regularExpression) != nil
+        let translationMentionsFigure = translated.contains("شکل") ||
+            translated.range(of: #"(?i)\bfig\.?|figure\b"#, options: .regularExpression) != nil
+        return sourceMentionsFigure && translationMentionsFigure
+    }
+
+    private func displayBlocks(from blocks: [EPUBSourceBlock]) -> [EPUBSourceBlock] {
+        var result: [EPUBSourceBlock] = []
+        var index = 0
+
+        while index < blocks.count {
+            guard case let .text(text) = blocks[index] else {
+                result.append(blocks[index])
+                index += 1
+                continue
+            }
+
+            var mergedText = text
+            var nextIndex = index + 1
+            while nextIndex < blocks.count,
+                  case let .text(nextText) = blocks[nextIndex],
+                  shouldMergeTextFragment(current: mergedText, next: nextText) {
+                mergedText += "\n" + nextText
+                nextIndex += 1
+            }
+
+            result.append(.text(mergedText))
+            index = nextIndex
+        }
+
+        return result
+    }
+
+    private func shouldMergeTextFragment(current: String, next: String) -> Bool {
+        if shouldMergeTitleFragment(current: current, next: next) {
+            return true
+        }
+
+        let currentTrimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextTrimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !currentTrimmed.isEmpty, !nextTrimmed.isEmpty else {
+            return false
+        }
+        guard !endsSentence(currentTrimmed),
+              !isHeadingLike(currentTrimmed),
+              !startsNewListItem(nextTrimmed) else {
+            return false
+        }
+
+        return currentTrimmed.count >= 45 || startsWithContinuation(nextTrimmed)
+    }
+
+    private func shouldMergeTitleFragment(current: String, next: String) -> Bool {
+        let currentTrimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextTrimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard currentTrimmed.count <= 90,
+              nextTrimmed.count <= 60 else {
+            return false
+        }
+
+        return isTitleLike(currentTrimmed) && isTitleLike(nextTrimmed)
+    }
+
+    private func isTitleLike(_ text: String) -> Bool {
+        let letters = text.filter(\.isLetter)
+        guard !letters.isEmpty else { return false }
+        let uppercaseLetters = letters.filter(\.isUppercase)
+        if Double(uppercaseLetters.count) / Double(letters.count) >= 0.75 {
+            return true
+        }
+
+        return text.range(of: #"(?i)^\s*(chapter|part|section)\b"#, options: .regularExpression) != nil
+    }
+
+    private func isHeadingLike(_ text: String) -> Bool {
+        guard text.count <= 72,
+              !endsSentence(text),
+              !startsNewListItem(text) else {
+            return false
+        }
+
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        return wordCount <= 8
+    }
+
+    private func endsSentence(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else {
+            return false
+        }
+        return ".!?:;،؛؟。)»”]".contains(last)
+    }
+
+    private func startsNewListItem(_ text: String) -> Bool {
+        text.range(of: #"^\s*(?:[\u{2022}\-*•]|\d+[\.\)])\s+"#, options: .regularExpression) != nil
+    }
+
+    private func startsWithContinuation(_ text: String) -> Bool {
+        guard let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first else {
+            return false
+        }
+        return first.isLowercase || "،؛:;)]}»”".contains(first)
     }
 
     private func stylesheet(options: TextPDFExportOptions) -> String {
@@ -256,7 +432,69 @@ struct EPUBExportService {
         .blank-page {
           min-height: 70vh;
         }
+        a {
+          color: #1457d9;
+          text-decoration: underline;
+        }
+        .source-image {
+          margin: 1rem 0;
+          text-align: center;
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+        .source-image img {
+          display: inline-block;
+          max-width: 100%;
+          height: auto;
+        }
         """
+    }
+
+    private func imageAssetsForExport(from sourcePages: [EPUBSourcePage]) -> [EPUBImageAsset] {
+        var assets: [EPUBImageAsset] = []
+        var paths: Set<String> = []
+
+        for page in sourcePages {
+            for block in page.blocks {
+                guard case let .image(image) = block, !paths.contains(image.path) else {
+                    continue
+                }
+
+                paths.insert(image.path)
+                let index = assets.count + 1
+                let ext = URL(fileURLWithPath: image.path).pathExtension
+                let safeExt = ext.isEmpty ? "bin" : ext
+                assets.append(
+                    EPUBImageAsset(
+                        id: "source-image-\(index)",
+                        href: "Images/source-image-\(String(format: "%04d", index)).\(safeExt)",
+                        image: image
+                    )
+                )
+            }
+        }
+
+        return assets
+    }
+
+    private func sourcePage(at index: Int, in sourcePages: [EPUBSourcePage]?) -> EPUBSourcePage? {
+        guard let sourcePages, sourcePages.indices.contains(index) else {
+            return nil
+        }
+        return sourcePages[index]
+    }
+
+    private func epubHref(for link: EPUBSourceLink) -> String {
+        if let scheme = URL(string: link.href)?.scheme?.lowercased(),
+           ["http", "https", "mailto"].contains(scheme) {
+            return link.href
+        }
+
+        if link.href.hasPrefix("#") {
+            return link.href
+        }
+
+        return link.url.absoluteString
     }
 
     private func paragraphs(for page: TranslatedTextPage) -> [EPUBParagraph] {
@@ -313,6 +551,12 @@ struct EPUBExportService {
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
     }
+
+    private func escapeXMLAttribute(_ value: String) -> String {
+        escapeXML(value)
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+    }
 }
 
 private struct EPUBPageItem {
@@ -320,11 +564,18 @@ private struct EPUBPageItem {
     let href: String
     let label: String
     let page: TranslatedTextPage
+    let sourcePage: EPUBSourcePage?
 }
 
 private struct EPUBParagraph {
     let text: String
     let role: TextRole
+}
+
+private struct EPUBImageAsset {
+    let id: String
+    let href: String
+    let image: EPUBSourceImage
 }
 
 private struct ZIPEntry {
