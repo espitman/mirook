@@ -133,6 +133,7 @@ final class PDFDocumentStore: ObservableObject {
     private let keychainService = KeychainService()
     private static let currentParagraphLayoutVersion = 3
     private var pendingPasswordDialogAction: PendingPasswordDialogAction?
+    private var activeSecurityScopedURLs: [String: URL] = [:]
 
     private enum PendingPasswordDialogAction {
         case set(projectID: String)
@@ -276,6 +277,7 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     func openPDF(from url: URL) {
+        activateSecurityScope(for: url)
         guard let loadedDocument = PDFDocument(url: url) else {
             lastErrorMessage = "The selected file could not be opened as a PDF."
             return
@@ -305,8 +307,10 @@ final class PDFDocumentStore: ObservableObject {
     }
 
     func openBook(from url: URL) {
+        activateSecurityScope(for: url)
         do {
             let package = try translationProjectStore.loadProject(fromBookURL: url)
+            activateSecurityScope(for: package.bookURL)
             guard let loadedDocument = PDFDocument(data: package.pdfData) else {
                 lastErrorMessage = "The embedded PDF in this Mirook book could not be opened."
                 return
@@ -316,6 +320,7 @@ final class PDFDocumentStore: ObservableObject {
         } catch let error as TranslationProjectStoreError {
             handleOpenError(error) { [self] in
                 let package = try self.translationProjectStore.loadProject(fromBookURL: url)
+                self.activateSecurityScope(for: package.bookURL)
                 guard let loadedDocument = PDFDocument(data: package.pdfData) else {
                     throw TranslationProjectStoreError.missingEmbeddedPDF(displayName: url.deletingPathExtension().lastPathComponent)
                 }
@@ -494,7 +499,7 @@ final class PDFDocumentStore: ObservableObject {
     private func openLoadedBook(_ loadedDocument: PDFDocument, package: TranslationProjectPackage) throws {
         try applyOpenedDocument(
             loadedDocument,
-            sourceURL: URL(fileURLWithPath: package.manifest.sourcePath),
+            sourceURL: package.bookURL,
             displayName: package.manifest.displayName,
             project: package.manifest
         )
@@ -506,6 +511,7 @@ final class PDFDocumentStore: ObservableObject {
         displayName: String,
         project: TranslationProjectManifest
     ) throws {
+        releaseInactiveSecurityScopes(keeping: sourceURL)
         document = loadedDocument
         documentURL = sourceURL
         documentDisplayName = displayName
@@ -527,6 +533,26 @@ final class PDFDocumentStore: ObservableObject {
         hydrateParagraphBlocksForLoadedPages(document: loadedDocument, projectID: project.id)
         translatedTextPage = translatedTextPagesByIndex[currentPageIndex]
         try refreshCurrentBookPasswordStatus()
+    }
+
+    private func activateSecurityScope(for url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        let path = standardizedURL.path
+        guard activeSecurityScopedURLs[path] == nil else { return }
+
+        if standardizedURL.startAccessingSecurityScopedResource() {
+            activeSecurityScopedURLs[path] = standardizedURL
+        }
+    }
+
+    private func releaseInactiveSecurityScopes(keeping url: URL?) {
+        let keepPath = url?.standardizedFileURL.path
+        let pathsToRelease = activeSecurityScopedURLs.keys.filter { $0 != keepPath }
+        for path in pathsToRelease {
+            guard let activeURL = activeSecurityScopedURLs[path] else { continue }
+            activeURL.stopAccessingSecurityScopedResource()
+            activeSecurityScopedURLs[path] = nil
+        }
     }
 
     private func resetProjectStateAfterOpenFailure() {

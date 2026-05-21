@@ -718,7 +718,6 @@ final class TranslationProjectStore {
         for bookURL in bookURLs {
             let database = try MirookBookDatabase(url: bookURL)
             if try encryptionMetadata(database: database) != nil {
-                try backfillPublicFingerprintForLockedBook(database: database)
                 continue
             }
 
@@ -727,17 +726,7 @@ final class TranslationProjectStore {
                 continue
             }
 
-            var sourcePDFData = try database.loadMetadataJSONData(key: MetadataKey.sourcePDF)
-            if sourcePDFData == nil {
-                let sourceURL = URL(fileURLWithPath: manifest.sourcePath)
-                if fileManager.fileExists(atPath: sourceURL.path) {
-                    let data = try Data(contentsOf: sourceURL)
-                    try database.saveMetadataJSONData(data, key: MetadataKey.sourcePDF)
-                    sourcePDFData = data
-                }
-            }
-
-            if let sourcePDFData {
+            if let sourcePDFData = try database.loadMetadataJSONData(key: MetadataKey.sourcePDF) {
                 let sourceFingerprint = fingerprint(for: sourcePDFData)
                 if manifest.sourceFingerprint != sourceFingerprint {
                     manifest.sourceFingerprint = sourceFingerprint
@@ -747,24 +736,6 @@ final class TranslationProjectStore {
 
             try savePublicInfo(manifest, database: database)
         }
-    }
-
-    private func backfillPublicFingerprintForLockedBook(database: MirookBookDatabase) throws {
-        if try database.loadInfoText(key: InfoKey.sourceFingerprint) != nil {
-            return
-        }
-
-        guard let sourcePath = try database.loadInfoText(key: InfoKey.sourcePath) else {
-            return
-        }
-
-        let sourceURL = URL(fileURLWithPath: sourcePath)
-        guard fileManager.fileExists(atPath: sourceURL.path) else {
-            return
-        }
-
-        let sourceFingerprint = fingerprint(for: try Data(contentsOf: sourceURL))
-        try database.saveInfoText(sourceFingerprint, key: InfoKey.sourceFingerprint)
     }
 
     private func migrateAllLegacyProjectsIfNeeded() throws {
@@ -821,17 +792,9 @@ final class TranslationProjectStore {
     private func migrateLegacyProject(at projectURL: URL) throws {
         let manifestURL = projectURL.appendingPathComponent("manifest.json")
         let manifestData = try Data(contentsOf: manifestURL)
-        var manifest = try decoder.decode(TranslationProjectManifest.self, from: manifestData)
+        let manifest = try decoder.decode(TranslationProjectManifest.self, from: manifestData)
         let destinationURL = try bookURL(projectID: manifest.id, displayName: manifest.displayName)
         let database = try MirookBookDatabase(url: destinationURL)
-
-        let sourceURL = URL(fileURLWithPath: manifest.sourcePath)
-        if fileManager.fileExists(atPath: sourceURL.path),
-           try database.loadMetadataJSONData(key: MetadataKey.sourcePDF) == nil {
-            let sourceData = try Data(contentsOf: sourceURL)
-            manifest.sourceFingerprint = fingerprint(for: sourceData)
-            try database.saveMetadataJSONData(sourceData, key: MetadataKey.sourcePDF)
-        }
 
         try savePublicInfo(manifest, database: database)
         if try database.loadMetadataJSONData(key: MetadataKey.manifest) == nil {
