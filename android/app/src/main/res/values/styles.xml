@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.MirookReader" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">@font/vazirmatn_regular</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F6F1E8</item>
+        <item name="android:statusBarColor">#F6F1E8</item>
+    </style>
+</resources>

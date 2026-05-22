@@ -11,6 +11,24 @@ struct MainWindowView: View {
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
 
+            PageKeyboardNavigationHandler(
+                isEnabled: documentStore.hasOpenDocument &&
+                    documentStore.bookPasswordDialog == nil &&
+                    documentStore.lastErrorMessage == nil,
+                exitsOnEscape: documentStore.isReadingMode,
+                onPrevious: {
+                    documentStore.goToPreviousPage()
+                },
+                onNext: {
+                    documentStore.goToNextPage()
+                },
+                onExit: {
+                    documentStore.isReadingMode = false
+                }
+            )
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+
             if documentStore.isReadingMode, documentStore.hasOpenDocument {
                 ReadingModeView()
             } else {
@@ -879,6 +897,7 @@ private struct ReadingModeRTLTextView: NSViewRepresentable {
         )
     }
 
+    @MainActor
     final class Coordinator {
         var lastText = ""
     }
@@ -988,6 +1007,122 @@ private struct ReadingModeRTLParagraphView: NSViewRepresentable {
             layoutManager.ensureLayout(for: textContainer)
             let usedRect = layoutManager.usedRect(for: textContainer)
             return NSSize(width: NSView.noIntrinsicMetric, height: ceil(usedRect.height))
+        }
+    }
+}
+
+private struct PageKeyboardNavigationHandler: NSViewRepresentable {
+    let isEnabled: Bool
+    let exitsOnEscape: Bool
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onExit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            isEnabled: isEnabled,
+            exitsOnEscape: exitsOnEscape,
+            onPrevious: onPrevious,
+            onNext: onNext,
+            onExit: onExit
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.installMonitor()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.isEnabled = isEnabled
+        context.coordinator.exitsOnEscape = exitsOnEscape
+        context.coordinator.onPrevious = onPrevious
+        context.coordinator.onNext = onNext
+        context.coordinator.onExit = onExit
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    final class Coordinator {
+        var isEnabled: Bool
+        var exitsOnEscape: Bool
+        var onPrevious: () -> Void
+        var onNext: () -> Void
+        var onExit: () -> Void
+        private var monitor: Any?
+
+        init(
+            isEnabled: Bool,
+            exitsOnEscape: Bool,
+            onPrevious: @escaping () -> Void,
+            onNext: @escaping () -> Void,
+            onExit: @escaping () -> Void
+        ) {
+            self.isEnabled = isEnabled
+            self.exitsOnEscape = exitsOnEscape
+            self.onPrevious = onPrevious
+            self.onNext = onNext
+            self.onExit = onExit
+        }
+
+        func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      self.isEnabled,
+                      event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+                      !Self.isEditingTextInput() else {
+                    return event
+                }
+
+                switch event.keyCode {
+                case 53:
+                    guard self.exitsOnEscape else {
+                        return event
+                    }
+                    self.onExit()
+                    return nil
+                case 123:
+                    self.onPrevious()
+                    return nil
+                case 124:
+                    self.onNext()
+                    return nil
+                default:
+                    return event
+                }
+            }
+        }
+
+        func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+        }
+
+        deinit {
+            removeMonitor()
+        }
+
+        @MainActor
+        private static func isEditingTextInput() -> Bool {
+            guard let firstResponder = NSApp.keyWindow?.firstResponder else {
+                return false
+            }
+
+            if let textView = firstResponder as? NSTextView {
+                return textView.isEditable
+            }
+
+            if firstResponder is NSTextField {
+                return true
+            }
+
+            return false
         }
     }
 }
