@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Vazirmatn";
+  src:
+    local("Vazirmatn"),
+    local("Vazir");
+  font-display: swap;
+}
+
+:root {
+  color: #171717;
+  background: #f4efe6;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.paper-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cfc7ba transparent;
+}
+
+.paper-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.paper-scroll::-webkit-scrollbar-thumb {
+  background: #cfc7ba;
+  border-radius: 999px;
+}

@@ -12,5 +12,12 @@ xcuserdata/
 .build/
 .swiftpm/
 
+# JavaScript reader app
+reader/node_modules/
+reader/dist/
+reader/*.tsbuildinfo
+reader/vite.config.js
+reader/vite.config.d.ts
+
 # Local configuration
 *.xcconfig.local
