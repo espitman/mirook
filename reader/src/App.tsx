@@ -1,11 +1,55 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, FileText, FolderOpen, Loader2, Minus, PanelLeftClose, Plus } from "lucide-react";
+import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
+import {
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  FolderOpen,
+  Highlighter,
+  Loader2,
+  MessageSquare,
+  Minus,
+  PanelLeftClose,
+  Plus,
+  Save,
+  Settings,
+  StickyNote,
+  Trash2,
+  X
+} from "lucide-react";
 import type { DisplayBlock } from "./readerBlocks";
 import { pageAlignedSourceBlocks, sourceDisplayBlocks, sourcePlainText, translatedDisplayBlocks } from "./readerBlocks";
-import type { EpubBlock, MirookBookPayload, TranslatedTextPage } from "./types";
+import type { AnnotationSide, EpubBlock, LiaraAiSettings, MirookBookPayload, ReaderAnnotation, TranslatedTextPage } from "./types";
 
 type ViewMode = "split" | "original" | "translation";
+type SelectionState = {
+  x: number;
+  y: number;
+  pageIndex: number;
+  side: AnnotationSide;
+  blockId: string;
+  startOffset: number;
+  endOffset: number;
+  selectedText: string;
+};
+type SwipeDirection = "previous" | "next";
+type WheelSwipeState = { deltaX: number; deltaY: number; triggered: boolean; resetId: number | null };
+type NotePopoverPosition = { left: number; top: number; width: number; arrowLeft: number; placement: "above" | "below" };
+type NotePopoverAnchor = { x: number; y: number };
+
+const HIGHLIGHT_COLORS = [
+  { label: "Yellow", value: "#fde68a" },
+  { label: "Green", value: "#bbf7d0" },
+  { label: "Blue", value: "#bfdbfe" },
+  { label: "Pink", value: "#fbcfe8" },
+  { label: "Purple", value: "#ddd6fe" }
+];
+
+const AI_MODELS = [
+  { label: "openai/gpt-5-nano", value: "openai/gpt-5-nano" }
+];
 
 export function App() {
   const [book, setBook] = useState<MirookBookPayload | null>(null);
@@ -13,8 +57,19 @@ export function App() {
   const [fontSize, setFontSize] = useState(() => Number(localStorage.getItem("mirook-reader-font-size") ?? 22));
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<ReaderAnnotation[]>([]);
+  const [selection, setSelection] = useState<SelectionState | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [selectedHighlightColor, setSelectedHighlightColor] = useState(HIGHLIGHT_COLORS[0].value);
+  const [notesColorFilter, setNotesColorFilter] = useState<string | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsMounted, setSettingsMounted] = useState(false);
+  const [aiSettings, setAiSettings] = useState<LiaraAiSettings>({ url: "", apiKey: "", model: AI_MODELS[0].value });
   const [isOpening, setIsOpening] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const wheelSwipeRef = useRef<WheelSwipeState>({ deltaX: 0, deltaY: 0, triggered: false, resetId: null });
 
   const pageCount = book?.manifest.pageCount ?? 0;
   const page = useMemo(() => book?.pages.find((item) => item.pageIndex === pageIndex), [book, pageIndex]);
@@ -30,8 +85,63 @@ export function App() {
   }, [fontSize]);
 
   useEffect(() => {
+    let isCurrent = true;
+    window.mirook.getAiSettings()
+      .then((settings) => {
+        if (isCurrent) setAiSettings(settings);
+      })
+      .catch((err) => setError(errorMessage(err)));
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (settingsOpen) {
+      setSettingsMounted(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setSettingsMounted(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSettings();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!book) return;
+    const timeout = window.setTimeout(() => {
+      void window.mirook.saveReadingPosition({
+        bookId: book.id,
+        pageIndex,
+        viewMode,
+        fontSize
+      });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [book, pageIndex, viewMode, fontSize]);
+
+  useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [pageIndex, viewMode, book?.id]);
+
+  useEffect(() => {
+    if (!selection) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-selection-toolbar]")) return;
+      setSelection(null);
+      setNoteDraft("");
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [selection]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -91,12 +201,12 @@ export function App() {
   async function openBook() {
     setIsOpening(true);
     setError(null);
+    setNotice(null);
+    setSelection(null);
     try {
       const payload = await window.mirook.openBook();
       if (payload) {
-        setBook(payload);
-        setPageIndex(firstReadablePage(payload));
-        setViewMode("split");
+        applyOpenedBook(payload);
       }
     } catch (err) {
       setError(errorMessage(err));
@@ -108,16 +218,142 @@ export function App() {
   async function openPath(path: string) {
     setIsOpening(true);
     setError(null);
+    setNotice(null);
+    setSelection(null);
     try {
       const payload = await window.mirook.openBookPath(path);
-      setBook(payload);
-      setPageIndex(firstReadablePage(payload));
-      setViewMode("split");
+      applyOpenedBook(payload);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setIsOpening(false);
     }
+  }
+
+  function applyOpenedBook(payload: MirookBookPayload) {
+    const savedPosition = payload.readerState?.position;
+    const savedPageIndex = Number(savedPosition?.page_index);
+    const savedPageCount = payload.manifest.pageCount || payload.pages.length;
+    const restoredPageIndex =
+      Number.isInteger(savedPageIndex) && savedPageIndex >= 0 && savedPageIndex < savedPageCount
+        ? savedPageIndex
+        : firstReadablePage(payload);
+    const savedViewMode = savedPosition?.view_mode;
+    const savedFontSize = Number(savedPosition?.font_size);
+
+    setBook(payload);
+    setAnnotations(payload.readerState?.annotations ?? []);
+    setPageIndex(restoredPageIndex);
+    setViewMode(isViewMode(savedViewMode) ? savedViewMode : "split");
+    if (Number.isFinite(savedFontSize) && savedFontSize >= 14 && savedFontSize <= 36) setFontSize(savedFontSize);
+  }
+
+  async function exportBookData() {
+    if (!book) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const exportedPath = await window.mirook.exportBookData(book.id);
+      if (exportedPath) setNotice(`Reader data exported to ${exportedPath}`);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  function handleSelectionContextMenu(side: AnnotationSide, selectedPageIndex: number, event: ReactMouseEvent<HTMLElement>) {
+    const nextSelection = selectionFromWindow(side, selectedPageIndex, { x: event.clientX, y: event.clientY });
+    if (!nextSelection) {
+      setSelection(null);
+      return;
+    }
+    event.preventDefault();
+    setSelection(nextSelection);
+    setNoteDraft("");
+  }
+
+  async function saveSelectedAnnotation(note?: string | null) {
+    if (!book || !selection) return;
+    setError(null);
+    try {
+      const saved = await window.mirook.saveAnnotation({
+        bookId: book.id,
+        pageIndex: selection.pageIndex,
+        side: selection.side,
+        blockId: selection.blockId,
+        startOffset: selection.startOffset,
+        endOffset: selection.endOffset,
+        selectedText: selection.selectedText,
+        color: selectedHighlightColor,
+        note: note?.trim() || null
+      });
+      setAnnotations((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+      setSelection(null);
+      setNoteDraft("");
+      window.getSelection()?.removeAllRanges();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function deleteAnnotation(id: string) {
+    setError(null);
+    try {
+      await window.mirook.deleteAnnotation(id);
+      setAnnotations((items) => items.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function saveAiSettings(nextSettings: LiaraAiSettings) {
+    setError(null);
+    setNotice(null);
+    try {
+      const saved = await window.mirook.saveAiSettings(nextSettings);
+      setAiSettings(saved);
+      closeSettings();
+      setNotice("Liara settings saved.");
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  function openSettings() {
+    setSettingsMounted(true);
+    window.requestAnimationFrame(() => setSettingsOpen(true));
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false);
+  }
+
+  function handleSwipePage(direction: SwipeDirection) {
+    setSelection(null);
+    setPageIndex((value) => {
+      if (direction === "previous") return Math.max(0, value - 1);
+      return Math.min(pageCount - 1, value + 1);
+    });
+  }
+
+  function handleWheelSwipe(event: ReactWheelEvent<HTMLElement>) {
+    if (!isWheelSwipeAllowed(event)) return;
+    const state = wheelSwipeRef.current;
+    state.deltaX += event.deltaX;
+    state.deltaY += event.deltaY;
+    if (state.resetId) window.clearTimeout(state.resetId);
+    state.resetId = window.setTimeout(() => {
+      wheelSwipeRef.current = { deltaX: 0, deltaY: 0, triggered: false, resetId: null };
+    }, 110);
+
+    if (state.triggered) {
+      event.preventDefault();
+      return;
+    }
+
+    if (Math.abs(state.deltaX) < 82 || Math.abs(state.deltaX) < Math.abs(state.deltaY) * 1.35) return;
+    state.triggered = true;
+    event.preventDefault();
+    handleSwipePage(state.deltaX < 0 ? "previous" : "next");
   }
 
   async function handleHeaderDoubleClick(event: ReactMouseEvent<HTMLElement>) {
@@ -164,6 +400,43 @@ export function App() {
           <ModeSwitch value={viewMode} onChange={setViewMode} disabled={!hasBook} />
           <button
             type="button"
+            onClick={() => setNotesOpen((value) => !value)}
+            disabled={!hasBook}
+            className={`relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line hover:bg-cream disabled:opacity-35 ${
+              notesOpen ? "bg-ink text-white hover:bg-black" : "bg-white"
+            }`}
+            title="Notes and highlights"
+          >
+            <StickyNote size={18} />
+            {annotations.length ? (
+              <span
+                className={`absolute -right-1 -top-1 min-w-5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                  notesOpen ? "bg-white text-ink" : "bg-ink text-white"
+                }`}
+              >
+                {annotations.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={exportBookData}
+            disabled={!hasBook}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream disabled:opacity-35"
+            title="Export reader data"
+          >
+            <Download size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={openSettings}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream"
+            title="Settings"
+          >
+            <Settings size={18} />
+          </button>
+          <button
+            type="button"
             onClick={openBook}
             disabled={isOpening}
             className="ml-2 inline-flex h-10 min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-sm hover:bg-black disabled:opacity-55"
@@ -177,6 +450,9 @@ export function App() {
       {error ? (
         <div className="mx-8 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}
+      {notice ? (
+        <div className="mx-8 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>
+      ) : null}
 
       <main ref={scrollRef} className="min-h-0 flex-1 overflow-hidden px-8 py-7">
         {!book ? (
@@ -189,33 +465,57 @@ export function App() {
             sourceBlocks={sourceBlocks}
             fontSize={fontSize}
             viewMode={viewMode}
+            annotations={annotations}
+            notesColorFilter={notesColorFilter}
+            notesOpen={notesOpen}
+            onSelectionContextMenu={handleSelectionContextMenu}
+            onWheelSwipe={handleWheelSwipe}
+            onNotesColorFilterChange={setNotesColorFilter}
+            onDeleteAnnotation={deleteAnnotation}
+            onGoToAnnotation={(annotation) => {
+              setPageIndex(annotation.page_index);
+              setViewMode(annotation.side === "original" ? "original" : "translation");
+            }}
           />
         )}
       </main>
 
-      <footer className="flex h-20 shrink-0 items-center justify-center border-t border-line bg-paper/90 px-8">
-        <div className="flex w-full max-w-5xl items-center justify-between rounded-2xl border border-line bg-white/80 p-2 shadow-sm">
-          <button
-            type="button"
-            disabled={!canGoPrevious}
-            onClick={() => setPageIndex((value) => Math.max(0, value - 1))}
-            className="inline-flex h-11 items-center gap-2 rounded-xl px-5 text-sm font-medium hover:bg-cream disabled:opacity-35"
-          >
-            <ChevronLeft size={20} />
-            Previous
-          </button>
-          <div className="text-sm font-semibold text-muted">{hasBook ? `Page ${pageIndex + 1} / ${pageCount}` : "No book open"}</div>
-          <button
-            type="button"
-            disabled={!canGoNext}
-            onClick={() => setPageIndex((value) => Math.min(pageCount - 1, value + 1))}
-            className="inline-flex h-11 items-center gap-2 rounded-xl px-5 text-sm font-medium hover:bg-cream disabled:opacity-35"
-          >
-            Next
-            <ChevronRight size={20} />
-          </button>
-        </div>
-      </footer>
+      {selection ? (
+        <SelectionToolbar
+          selection={selection}
+          noteDraft={noteDraft}
+          selectedColor={selectedHighlightColor}
+          onNoteDraftChange={setNoteDraft}
+          onSelectedColorChange={setSelectedHighlightColor}
+          onHighlight={() => saveSelectedAnnotation(null)}
+          onSaveNote={() => saveSelectedAnnotation(noteDraft)}
+          onClose={() => {
+            setSelection(null);
+            setNoteDraft("");
+            window.getSelection()?.removeAllRanges();
+          }}
+        />
+      ) : null}
+
+      {settingsMounted ? (
+        <SettingsDialog
+          open={settingsOpen}
+          settings={aiSettings}
+          onClose={closeSettings}
+          onSave={saveAiSettings}
+        />
+      ) : null}
+
+      <PageNavigator
+        hasBook={hasBook}
+        pageIndex={pageIndex}
+        pageCount={pageCount}
+        canGoPrevious={canGoPrevious}
+        canGoNext={canGoNext}
+        onPrevious={() => setPageIndex((value) => Math.max(0, value - 1))}
+        onNext={() => setPageIndex((value) => Math.min(pageCount - 1, value + 1))}
+        onGoToPage={(pageNumber) => setPageIndex(clampPageIndex(pageNumber - 1, pageCount))}
+      />
     </div>
   );
 }
@@ -226,7 +526,15 @@ function ReaderLayout({
   pageIndex,
   sourceBlocks,
   fontSize,
-  viewMode
+  viewMode,
+  annotations,
+  notesColorFilter,
+  notesOpen,
+  onSelectionContextMenu,
+  onWheelSwipe,
+  onNotesColorFilterChange,
+  onDeleteAnnotation,
+  onGoToAnnotation
 }: {
   book: MirookBookPayload;
   page?: TranslatedTextPage;
@@ -234,57 +542,159 @@ function ReaderLayout({
   sourceBlocks?: EpubBlock[];
   fontSize: number;
   viewMode: ViewMode;
+  annotations: ReaderAnnotation[];
+  notesColorFilter: string | null;
+  notesOpen: boolean;
+  onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
+  onWheelSwipe: (event: ReactWheelEvent<HTMLElement>) => void;
+  onNotesColorFilterChange: (color: string | null) => void;
+  onDeleteAnnotation: (id: string) => void;
+  onGoToAnnotation: (annotation: ReaderAnnotation) => void;
 }) {
   const translatedBlocks = translatedDisplayBlocks(sourceBlocks, page);
   const originalBlocks = sourceDisplayBlocks(sourceBlocks, page);
   const sourceText = sourcePlainText(sourceBlocks, page?.sourceText ?? "");
   const showOriginal = viewMode === "split" || viewMode === "original";
   const showTranslation = viewMode === "split" || viewMode === "translation";
+  const pageAnnotations = annotations.filter((annotation) => annotation.page_index === pageIndex);
 
   return (
-    <div
-      className={
-        viewMode === "split"
-          ? "mx-auto grid h-full min-h-0 max-w-[1480px] grid-cols-2 gap-5"
-          : "mx-auto grid h-full min-h-0 max-w-[900px] grid-cols-1"
-      }
-    >
-      {showOriginal ? (
-        <Paper key={`original-${pageIndex}`} title="Original" pageIndex={pageIndex}>
-          {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
-            <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
-          ) : originalBlocks.length ? (
-            <BlockFlow blocks={originalBlocks} fontSize={fontSize} direction="ltr" />
-          ) : page?.isBlank || !sourceText ? (
-            <div className="h-full min-h-[420px]" />
-          ) : (
-            <TextFlow text={sourceText} fontSize={fontSize} direction="ltr" />
-          )}
-        </Paper>
-      ) : null}
+    <div className={`mx-auto grid h-full min-h-0 max-w-[1720px] gap-5 ${notesOpen ? "grid-cols-[minmax(0,1fr)_320px]" : "grid-cols-1"}`}>
+      <div
+        className={
+          viewMode === "split"
+            ? "grid h-full min-h-0 grid-cols-2 gap-5"
+            : "mx-auto grid h-full min-h-0 w-full max-w-[900px] grid-cols-1"
+        }
+      >
+        {showOriginal ? (
+          <Paper
+            key={`original-${pageIndex}`}
+            title="Original"
+            pageIndex={pageIndex}
+            side="original"
+            onSelectionContextMenu={onSelectionContextMenu}
+            onWheelSwipe={onWheelSwipe}
+          >
+            {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
+              <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
+            ) : originalBlocks.length ? (
+              <BlockFlow blocks={originalBlocks} fontSize={fontSize} direction="ltr" side="original" pageIndex={pageIndex} annotations={pageAnnotations} />
+            ) : page?.isBlank || !sourceText ? (
+              <div className="h-full min-h-[420px]" />
+            ) : (
+              <TextFlow text={sourceText} fontSize={fontSize} direction="ltr" side="original" pageIndex={pageIndex} annotations={pageAnnotations} />
+            )}
+          </Paper>
+        ) : null}
 
-      {showTranslation ? (
-        <Paper key={`translation-${pageIndex}`} title="Translation" pageIndex={pageIndex}>
-          {page?.isBlank ? (
-            <div className="h-full min-h-[420px]" />
-          ) : translatedBlocks.length ? (
-            <DisplayFlow blocks={translatedBlocks} fontSize={fontSize} />
-          ) : (
-            <div className="flex h-full min-h-[420px] items-center justify-center text-center text-muted">No translation for this page yet.</div>
-          )}
-        </Paper>
+        {showTranslation ? (
+          <Paper
+            key={`translation-${pageIndex}`}
+            title="Translation"
+            pageIndex={pageIndex}
+            side="translation"
+            onSelectionContextMenu={onSelectionContextMenu}
+            onWheelSwipe={onWheelSwipe}
+          >
+            {page?.isBlank ? (
+              <div className="h-full min-h-[420px]" />
+            ) : translatedBlocks.length ? (
+              <DisplayFlow blocks={translatedBlocks} fontSize={fontSize} pageIndex={pageIndex} annotations={pageAnnotations} />
+            ) : (
+              <div className="flex h-full min-h-[420px] items-center justify-center text-center text-muted">No translation for this page yet.</div>
+            )}
+          </Paper>
+        ) : null}
+      </div>
+
+      {notesOpen ? (
+        <NotesPanel
+          annotations={annotations}
+          currentPageIndex={pageIndex}
+          colorFilter={notesColorFilter}
+          onColorFilterChange={onNotesColorFilterChange}
+          onDelete={onDeleteAnnotation}
+          onGoTo={onGoToAnnotation}
+        />
       ) : null}
     </div>
+  );
+}
+
+function PageNavigator({
+  hasBook,
+  pageIndex,
+  pageCount,
+  canGoPrevious,
+  canGoNext,
+  onPrevious,
+  onNext,
+  onGoToPage
+}: {
+  hasBook: boolean;
+  pageIndex: number;
+  pageCount: number;
+  canGoPrevious: boolean;
+  canGoNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+  onGoToPage: (pageNumber: number) => void;
+}) {
+  return (
+    <footer className="flex h-20 shrink-0 items-center justify-center border-t border-line bg-paper/90 px-8">
+      <div className="flex w-full max-w-5xl items-center justify-between rounded-2xl border border-line bg-white/80 p-2 shadow-sm">
+        <button
+          type="button"
+          disabled={!canGoPrevious}
+          onClick={onPrevious}
+          className="inline-flex h-11 items-center gap-2 rounded-xl px-5 text-sm font-medium hover:bg-cream disabled:opacity-35"
+        >
+          <ChevronLeft size={20} />
+          Previous
+        </button>
+
+        <div className="mx-6 min-w-[280px] flex-1">
+          <div className="text-center text-sm font-semibold text-muted">{hasBook ? `Page ${pageIndex + 1} / ${pageCount}` : "No book open"}</div>
+          <input
+            type="range"
+            min={1}
+            max={Math.max(pageCount, 1)}
+            value={hasBook ? pageIndex + 1 : 1}
+            disabled={!hasBook}
+            onChange={(event) => onGoToPage(Number(event.target.value))}
+            className="page-scrubber mt-1 w-full disabled:opacity-30"
+            aria-label="Page scrubber"
+          />
+        </div>
+
+        <button
+          type="button"
+          disabled={!canGoNext}
+          onClick={onNext}
+          className="inline-flex h-11 items-center gap-2 rounded-xl px-5 text-sm font-medium hover:bg-cream disabled:opacity-35"
+        >
+          Next
+          <ChevronRight size={20} />
+        </button>
+      </div>
+    </footer>
   );
 }
 
 function Paper({
   title,
   pageIndex,
+  side,
+  onSelectionContextMenu,
+  onWheelSwipe,
   children
 }: {
   title: string;
   pageIndex: number;
+  side: AnnotationSide;
+  onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
+  onWheelSwipe: (event: ReactWheelEvent<HTMLElement>) => void;
   children: ReactNode;
 }) {
   return (
@@ -293,14 +703,29 @@ function Paper({
         <h2 className="text-sm font-semibold">{title}</h2>
         <span className="text-sm text-muted">Page {pageIndex + 1}</span>
       </div>
-      <div data-reader-scroll-pane className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10">
+      <div
+        data-reader-scroll-pane
+        onContextMenu={(event) => onSelectionContextMenu(side, pageIndex, event)}
+        onWheel={onWheelSwipe}
+        className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10"
+      >
         {children}
       </div>
     </section>
   );
 }
 
-function DisplayFlow({ blocks, fontSize }: { blocks: DisplayBlock[]; fontSize: number }) {
+function DisplayFlow({
+  blocks,
+  fontSize,
+  pageIndex,
+  annotations
+}: {
+  blocks: DisplayBlock[];
+  fontSize: number;
+  pageIndex: number;
+  annotations: ReaderAnnotation[];
+}) {
   return (
     <div className="font-vazir leading-[2.05]" dir="rtl" style={{ fontSize }}>
       {blocks.map((block, index) => {
@@ -316,9 +741,10 @@ function DisplayFlow({ blocks, fontSize }: { blocks: DisplayBlock[]; fontSize: n
             </p>
           );
         }
+        const blockId = textBlockId("translation", pageIndex, index);
         return (
-          <p key={index} className="mb-5 whitespace-pre-wrap text-right">
-            {block.text}
+          <p key={index} data-annotation-block-id={blockId} className="mb-5 whitespace-pre-wrap text-right">
+            <MarkedText text={block.text} annotations={annotationsForBlock(annotations, blockId)} />
           </p>
         );
       })}
@@ -326,11 +752,32 @@ function DisplayFlow({ blocks, fontSize }: { blocks: DisplayBlock[]; fontSize: n
   );
 }
 
-function BlockFlow({ blocks, fontSize, direction }: { blocks: (EpubBlock | DisplayBlock)[]; fontSize: number; direction: "rtl" | "ltr" }) {
+function BlockFlow({
+  blocks,
+  fontSize,
+  direction,
+  side,
+  pageIndex,
+  annotations
+}: {
+  blocks: (EpubBlock | DisplayBlock)[];
+  fontSize: number;
+  direction: "rtl" | "ltr";
+  side: AnnotationSide;
+  pageIndex: number;
+  annotations: ReaderAnnotation[];
+}) {
   return (
     <div className={direction === "rtl" ? "font-vazir" : "font-serif"} dir={direction} style={{ fontSize, lineHeight: 1.75 }}>
       {blocks.map((block, index) => (
-        <Block key={index} block={block} fontSize={fontSize} direction={direction} />
+        <Block
+          key={index}
+          block={block}
+          fontSize={fontSize}
+          direction={direction}
+          blockId={textBlockId(side, pageIndex, index)}
+          annotations={annotations}
+        />
       ))}
     </div>
   );
@@ -339,11 +786,15 @@ function BlockFlow({ blocks, fontSize, direction }: { blocks: (EpubBlock | Displ
 function Block({
   block,
   fontSize,
-  direction
+  direction,
+  blockId,
+  annotations
 }: {
   block: EpubBlock | DisplayBlock;
   fontSize: number;
   direction: "rtl" | "ltr";
+  blockId: string;
+  annotations: ReaderAnnotation[];
 }) {
   if (block.type === "image") return <BookImage src={block.src} alt={block.altText ?? ""} compact />;
   const textStyle: CSSProperties = { fontSize, lineHeight: direction === "rtl" ? 2.05 : 1.75 };
@@ -360,20 +811,37 @@ function Block({
   }
 
   return (
-    <p className={className} dir={direction} style={textStyle}>
-      {block.text}
+    <p data-annotation-block-id={blockId} className={className} dir={direction} style={textStyle}>
+      <MarkedText text={block.text} annotations={annotationsForBlock(annotations, blockId)} />
     </p>
   );
 }
 
-function TextFlow({ text, fontSize, direction }: { text: string; fontSize: number; direction: "rtl" | "ltr" }) {
+function TextFlow({
+  text,
+  fontSize,
+  direction,
+  side,
+  pageIndex,
+  annotations
+}: {
+  text: string;
+  fontSize: number;
+  direction: "rtl" | "ltr";
+  side: AnnotationSide;
+  pageIndex: number;
+  annotations: ReaderAnnotation[];
+}) {
   return (
     <div className={direction === "rtl" ? "font-vazir" : "font-serif"} dir={direction} style={{ fontSize, lineHeight: 1.8 }}>
-      {text.split(/\n{2,}/).map((paragraph, index) => (
-        <p key={index} className="mb-5 whitespace-pre-wrap">
-          {paragraph}
-        </p>
-      ))}
+      {text.split(/\n{2,}/).map((paragraph, index) => {
+        const blockId = textBlockId(side, pageIndex, index);
+        return (
+          <p key={index} data-annotation-block-id={blockId} className="mb-5 whitespace-pre-wrap">
+            <MarkedText text={paragraph} annotations={annotationsForBlock(annotations, blockId)} />
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -384,6 +852,362 @@ function BookImage({ src, alt, compact = false }: { src: string; alt: string; co
       <img src={src} alt={alt} className="max-h-[640px] max-w-full object-contain" />
       {alt ? <figcaption className="mt-2 text-center text-sm text-muted">{alt}</figcaption> : null}
     </figure>
+  );
+}
+
+function MarkedText({ text, annotations }: { text: string; annotations: ReaderAnnotation[] }) {
+  if (!annotations.length) return <>{text}</>;
+  const ranges = annotations
+    .map((annotation) => ({
+      ...annotation,
+      start: Math.max(0, Math.min(text.length, Number(annotation.start_offset))),
+      end: Math.max(0, Math.min(text.length, Number(annotation.end_offset)))
+    }))
+    .filter((annotation) => annotation.end > annotation.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach((annotation) => {
+    if (annotation.start < cursor) return;
+    if (annotation.start > cursor) nodes.push(text.slice(cursor, annotation.start));
+    nodes.push(
+      <HighlightMark key={annotation.id} annotation={annotation}>
+        {text.slice(annotation.start, annotation.end)}
+      </HighlightMark>
+    );
+    cursor = annotation.end;
+  });
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return <>{nodes}</>;
+}
+
+function HighlightMark({ annotation, children }: { annotation: ReaderAnnotation; children: ReactNode }) {
+  const hasNote = Boolean(annotation.note?.trim());
+  const [popoverPosition, setPopoverPosition] = useState<NotePopoverPosition | null>(null);
+
+  function showNotePopover(event: ReactMouseEvent<HTMLElement>) {
+    if (!hasNote) return;
+    setPopoverPosition(notePopoverPosition({ x: event.clientX, y: event.clientY }));
+  }
+
+  function hideNotePopover() {
+    setPopoverPosition(null);
+  }
+
+  return (
+    <span className="relative inline" onMouseEnter={showNotePopover} onMouseMove={showNotePopover} onMouseLeave={hideNotePopover}>
+      <mark
+        className="rounded px-0.5"
+        style={{ backgroundColor: annotation.color || "#fde68a" }}
+      >
+        {children}
+      </mark>
+      {hasNote && popoverPosition ? (
+        <span
+          className="pointer-events-none fixed z-50 whitespace-normal rounded-xl border border-stone-300 bg-paper px-4 py-3 text-ink shadow-2xl"
+          dir="rtl"
+          style={{ left: popoverPosition.left, top: popoverPosition.top, width: popoverPosition.width }}
+        >
+          <span
+            className={`absolute h-4 w-4 rotate-45 rounded-[3px] border-stone-300 bg-paper ${
+              popoverPosition.placement === "below" ? "top-0 -translate-y-1/2 border-l border-t" : "bottom-0 translate-y-1/2 border-b border-r"
+            }`}
+            style={{ left: popoverPosition.arrowLeft }}
+          />
+          <span className="relative z-10 block text-center text-[11px] font-bold text-muted">یادداشت</span>
+          <span className="relative z-10 mt-2 block max-h-52 overflow-auto text-right font-vazir text-[15px] font-semibold leading-7 text-neutral-700">
+            {annotation.note}
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function notePopoverPosition(anchor: NotePopoverAnchor): NotePopoverPosition {
+  const margin = 16;
+  const gap = 14;
+  const width = Math.min(320, window.innerWidth - margin * 2);
+  const estimatedHeight = 160;
+  const targetX = anchor.x;
+  const left = Math.max(margin, Math.min(window.innerWidth - width - margin, targetX - width / 2));
+  const fitsBelow = anchor.y + gap + estimatedHeight <= window.innerHeight - margin;
+  const placement: NotePopoverPosition["placement"] = fitsBelow ? "below" : "above";
+  const top = placement === "below"
+    ? Math.max(margin, Math.min(window.innerHeight - estimatedHeight - margin, anchor.y + gap))
+    : Math.max(margin, anchor.y - gap - estimatedHeight);
+  const arrowLeft = Math.max(24, Math.min(width - 24, targetX - left));
+  return { left, top, width, arrowLeft, placement };
+}
+
+function SelectionToolbar({
+  selection,
+  noteDraft,
+  selectedColor,
+  onNoteDraftChange,
+  onSelectedColorChange,
+  onHighlight,
+  onSaveNote,
+  onClose
+}: {
+  selection: SelectionState;
+  noteDraft: string;
+  selectedColor: string;
+  onNoteDraftChange: (value: string) => void;
+  onSelectedColorChange: (value: string) => void;
+  onHighlight: () => void;
+  onSaveNote: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      data-selection-toolbar
+      className="fixed z-50 w-80 rounded-xl border border-line bg-white p-3 shadow-2xl"
+      style={{ left: selection.x, top: selection.y }}
+    >
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="min-w-0 text-xs text-muted">
+          <div className="font-semibold text-ink">{selection.side === "original" ? "Original" : "Translation"} · Page {selection.pageIndex + 1}</div>
+          <div className="mt-1 line-clamp-2">{selection.selectedText}</div>
+        </div>
+        <button type="button" onClick={onClose} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-cream">
+          <X size={15} />
+        </button>
+      </div>
+      <textarea
+        value={noteDraft}
+        onChange={(event) => onNoteDraftChange(event.target.value)}
+        placeholder="Add a comment..."
+        className="h-20 w-full resize-none rounded-lg border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-amber-400"
+      />
+      <div className="mt-3 flex items-center gap-2">
+        {HIGHLIGHT_COLORS.map((color) => (
+          <button
+            key={color.value}
+            type="button"
+            onClick={() => onSelectedColorChange(color.value)}
+            className={`h-7 w-7 rounded-full border ${
+              selectedColor === color.value ? "border-ink ring-2 ring-ink/20" : "border-line"
+            }`}
+            style={{ backgroundColor: color.value }}
+            title={color.label}
+          />
+        ))}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onHighlight}
+          className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-ink hover:brightness-95"
+          style={{ backgroundColor: selectedColor }}
+        >
+          <Highlighter size={16} />
+          Highlight
+        </button>
+        <button
+          type="button"
+          onClick={onSaveNote}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink px-3 text-sm font-semibold text-white hover:bg-black"
+        >
+          {noteDraft.trim() ? <MessageSquare size={16} /> : <Highlighter size={16} />}
+          {noteDraft.trim() ? "Save note" : "Save highlight"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsDialog({
+  open,
+  settings,
+  onClose,
+  onSave
+}: {
+  open: boolean;
+  settings: LiaraAiSettings;
+  onClose: () => void;
+  onSave: (settings: LiaraAiSettings) => void;
+}) {
+  const [draft, setDraft] = useState<LiaraAiSettings>(settings);
+
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft);
+  }
+
+  return (
+    <div
+      className={`app-no-drag fixed bottom-0 left-0 right-0 top-16 z-50 bg-black/25 transition-opacity duration-200 ${open ? "opacity-100" : "opacity-0"}`}
+      onMouseDown={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onMouseDown={(event) => event.stopPropagation()}
+        className={`h-full w-[420px] max-w-[calc(100vw-24px)] border-r border-line bg-white p-5 shadow-2xl transition-transform duration-200 ease-out ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold">Liara Settings</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">Saved locally on this device for the next AI steps.</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-cream">
+            <X size={18} />
+          </button>
+        </div>
+
+        <label className="mb-4 block">
+          <span className="mb-2 block text-sm font-semibold text-ink">URL</span>
+          <input
+            value={draft.url}
+            onChange={(event) => setDraft((value) => ({ ...value, url: event.target.value }))}
+            placeholder="https://..."
+            className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-2 block text-sm font-semibold text-ink">API Key</span>
+          <input
+            value={draft.apiKey}
+            onChange={(event) => setDraft((value) => ({ ...value, apiKey: event.target.value }))}
+            type="password"
+            placeholder="Liara API key"
+            className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+          />
+        </label>
+
+        <label className="mt-4 block">
+          <span className="mb-2 block text-sm font-semibold text-ink">Model</span>
+          <select
+            value={draft.model || AI_MODELS[0].value}
+            onChange={(event) => setDraft((value) => ({ ...value, model: event.target.value }))}
+            className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+          >
+            {AI_MODELS.map((model) => (
+              <option key={model.value} value={model.value}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-semibold text-muted hover:bg-cream">
+            Cancel
+          </button>
+          <button type="submit" className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-white hover:bg-black">
+            <Save size={16} />
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function NotesPanel({
+  annotations,
+  currentPageIndex,
+  colorFilter,
+  onColorFilterChange,
+  onDelete,
+  onGoTo
+}: {
+  annotations: ReaderAnnotation[];
+  currentPageIndex: number;
+  colorFilter: string | null;
+  onColorFilterChange: (color: string | null) => void;
+  onDelete: (id: string) => void;
+  onGoTo: (annotation: ReaderAnnotation) => void;
+}) {
+  const filteredAnnotations = annotations.filter((annotation) => !colorFilter || normalizedHighlightColor(annotation.color) === colorFilter);
+
+  return (
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
+      <div className="shrink-0 border-b border-line bg-paper px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">Notes</h2>
+            <p className="text-xs text-muted">{filteredAnnotations.length} of {annotations.length} saved</p>
+          </div>
+          <StickyNote size={18} className="text-muted" />
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onColorFilterChange(null)}
+            className={`h-7 rounded-full border px-3 text-xs font-semibold ${
+              colorFilter === null ? "border-ink bg-ink text-white" : "border-line bg-white text-muted hover:bg-cream"
+            }`}
+          >
+            All
+          </button>
+          {HIGHLIGHT_COLORS.map((color) => (
+            <button
+              key={color.value}
+              type="button"
+              onClick={() => onColorFilterChange(color.value)}
+              className={`h-7 w-7 rounded-full border ${
+                colorFilter === color.value ? "border-ink ring-2 ring-ink/20" : "border-line hover:ring-2 hover:ring-ink/10"
+              }`}
+              style={{ backgroundColor: color.value }}
+              title={color.label}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="paper-scroll min-h-0 flex-1 overflow-auto p-3">
+        {filteredAnnotations.length ? (
+          filteredAnnotations
+            .slice()
+            .sort((a, b) => a.page_index - b.page_index || String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
+            .map((annotation) => {
+              const color = normalizedHighlightColor(annotation.color);
+              return (
+                <article
+                  key={annotation.id}
+                  className={`mb-3 rounded-xl border p-3 ${
+                    annotation.page_index === currentPageIndex ? "border-ink/35" : "border-line"
+                  }`}
+                  style={{ backgroundColor: tintedHighlightColor(color) }}
+                >
+                  <button type="button" onClick={() => onGoTo(annotation)} className="block w-full text-left">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-muted">
+                      <span>
+                        {annotation.side === "original" ? "Original" : "Translation"} · Page {annotation.page_index + 1}
+                      </span>
+                      {annotation.note ? <MessageSquare size={14} /> : <Highlighter size={14} />}
+                    </div>
+                    <p className="line-clamp-3 text-sm leading-6 text-ink">{annotation.selected_text}</p>
+                    {annotation.note ? <p className="mt-2 rounded-lg bg-white/55 px-3 py-2 text-sm leading-6 text-ink">{annotation.note}</p> : null}
+                  </button>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => onDelete(annotation.id)}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-red-700 hover:bg-white/55"
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              );
+            })
+        ) : (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm leading-6 text-muted">
+            {annotations.length ? "No notes match this color." : "Select text in Original or Translation to save highlights and comments."}
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -444,6 +1268,103 @@ function LogoMark({ large = false }: { large?: boolean }) {
 
 function firstReadablePage(payload: MirookBookPayload) {
   return payload.pages.find((page) => page.translatedText?.trim() || page.isBlank)?.pageIndex ?? 0;
+}
+
+function isViewMode(value: unknown): value is ViewMode {
+  return value === "split" || value === "original" || value === "translation";
+}
+
+function clampPageIndex(index: number, pageCount: number) {
+  if (!pageCount) return 0;
+  return Math.min(pageCount - 1, Math.max(0, Math.trunc(index)));
+}
+
+function normalizedHighlightColor(color?: string | null) {
+  return color || HIGHLIGHT_COLORS[0].value;
+}
+
+function tintedHighlightColor(color: string) {
+  const known = HIGHLIGHT_COLORS.find((item) => item.value === color)?.value ?? HIGHLIGHT_COLORS[0].value;
+  return `${known}66`;
+}
+
+function textBlockId(side: AnnotationSide, pageIndex: number, blockIndex: number) {
+  return `${side}:${pageIndex}:${blockIndex}`;
+}
+
+function annotationsForBlock(annotations: ReaderAnnotation[], blockId: string) {
+  return annotations.filter((annotation) => annotation.block_id === blockId);
+}
+
+function isWheelSwipeAllowed(event: ReactWheelEvent<HTMLElement>) {
+  if (hasActiveTextSelection()) return false;
+  const target = event.target;
+  if (!(target instanceof Element)) return true;
+  return !target.closest("button, a, input, select, textarea, [data-selection-toolbar]");
+}
+
+function hasActiveTextSelection() {
+  const selection = window.getSelection();
+  return Boolean(selection && !selection.isCollapsed && selection.toString().trim());
+}
+
+function selectionFromWindow(side: AnnotationSide, pageIndex: number, point?: { x: number; y: number }): SelectionState | null {
+  const currentSelection = window.getSelection();
+  if (!currentSelection || currentSelection.rangeCount === 0 || currentSelection.isCollapsed) return null;
+  const range = currentSelection.getRangeAt(0);
+  const startBlock = closestAnnotationBlock(range.startContainer);
+  const endBlock = closestAnnotationBlock(range.endContainer);
+  if (!startBlock || !endBlock || startBlock !== endBlock) return null;
+
+  const offsets = rangeOffsetsWithin(startBlock, range);
+  if (!offsets || offsets.end <= offsets.start) return null;
+  const selectedText = startBlock.textContent?.slice(offsets.start, offsets.end).trim() || "";
+  if (!selectedText) return null;
+
+  const rect = range.getBoundingClientRect();
+  const position = clampedPopoverPosition(point?.x ?? rect.left + rect.width / 2, point?.y ?? rect.bottom + 8);
+  return {
+    x: position.x,
+    y: position.y,
+    pageIndex,
+    side,
+    blockId: startBlock.dataset.annotationBlockId || "",
+    startOffset: offsets.start,
+    endOffset: offsets.end,
+    selectedText
+  };
+}
+
+function clampedPopoverPosition(x: number, y: number) {
+  const width = 320;
+  const height = 286;
+  const margin = 12;
+  return {
+    x: Math.max(margin, Math.min(window.innerWidth - width - margin, x)),
+    y: Math.max(margin, Math.min(window.innerHeight - height - margin, y))
+  };
+}
+
+function closestAnnotationBlock(node: Node) {
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  return element?.closest<HTMLElement>("[data-annotation-block-id]") ?? null;
+}
+
+function rangeOffsetsWithin(container: HTMLElement, range: Range) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let start: number | null = null;
+  let end: number | null = null;
+  let node = walker.nextNode();
+  while (node) {
+    const length = node.textContent?.length ?? 0;
+    if (node === range.startContainer) start = offset + range.startOffset;
+    if (node === range.endContainer) end = offset + range.endOffset;
+    offset += length;
+    node = walker.nextNode();
+  }
+  if (start == null || end == null) return null;
+  return start <= end ? { start, end } : { start: end, end: start };
 }
 
 function errorMessage(error: unknown) {

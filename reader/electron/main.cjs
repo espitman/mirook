@@ -7,6 +7,8 @@ const initSqlJs = require("sql.js");
 
 let mainWindow;
 let sqlPromise;
+let readerDb;
+let readerDbPath;
 
 function appRoot() {
   return app.getAppPath();
@@ -69,6 +71,16 @@ function allRows(db, query, params = {}) {
   }
 }
 
+function run(db, query, params = {}) {
+  const statement = db.prepare(query);
+  try {
+    statement.bind(params);
+    statement.step();
+  } finally {
+    statement.free();
+  }
+}
+
 function bytesToString(value) {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -86,6 +98,241 @@ function normalizeBytes(value) {
 
 function dataUrl(bytes, mimeType) {
   return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
+async function getReaderDb() {
+  if (readerDb) return readerDb;
+  const SQL = await getSql();
+  readerDbPath = path.join(app.getPath("userData"), "reader.sqlite");
+  if (fs.existsSync(readerDbPath)) {
+    readerDb = new SQL.Database(fs.readFileSync(readerDbPath));
+  } else {
+    readerDb = new SQL.Database();
+  }
+  readerDb.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE IF NOT EXISTS books (
+      id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      source_kind TEXT,
+      page_count INTEGER NOT NULL DEFAULT 0,
+      manifest_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS reading_positions (
+      book_id TEXT PRIMARY KEY,
+      page_index INTEGER NOT NULL DEFAULT 0,
+      view_mode TEXT NOT NULL DEFAULT 'split',
+      font_size INTEGER,
+      scroll_original REAL NOT NULL DEFAULT 0,
+      scroll_translation REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS annotations (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      page_index INTEGER NOT NULL,
+      side TEXT NOT NULL,
+      block_id TEXT NOT NULL,
+      start_offset INTEGER NOT NULL,
+      end_offset INTEGER NOT NULL,
+      selected_text TEXT NOT NULL,
+      color TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      page_index INTEGER NOT NULL,
+      title TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  saveReaderDb();
+  return readerDb;
+}
+
+function saveReaderDb() {
+  if (!readerDb || !readerDbPath) return;
+  fs.mkdirSync(path.dirname(readerDbPath), { recursive: true });
+  fs.writeFileSync(readerDbPath, Buffer.from(readerDb.export()));
+}
+
+async function upsertBookRecord(payload) {
+  const db = await getReaderDb();
+  const now = new Date().toISOString();
+  run(
+    db,
+    `INSERT INTO books (id, fingerprint, title, file_path, source_kind, page_count, manifest_json, created_at, updated_at, last_opened_at)
+     VALUES ($id, $fingerprint, $title, $filePath, $sourceKind, $pageCount, $manifestJson, $now, $now, $now)
+     ON CONFLICT(id) DO UPDATE SET
+       fingerprint = excluded.fingerprint,
+       title = excluded.title,
+       file_path = excluded.file_path,
+       source_kind = excluded.source_kind,
+       page_count = excluded.page_count,
+       manifest_json = excluded.manifest_json,
+       updated_at = excluded.updated_at,
+       last_opened_at = excluded.last_opened_at`,
+    {
+      $id: payload.id,
+      $fingerprint: payload.fingerprint,
+      $title: payload.manifest.displayName || path.basename(payload.filePath),
+      $filePath: payload.filePath,
+      $sourceKind: String(payload.manifest.sourceKind || ""),
+      $pageCount: Number(payload.manifest.pageCount || payload.pages.length || 0),
+      $manifestJson: JSON.stringify(payload.manifest),
+      $now: now
+    }
+  );
+  saveReaderDb();
+}
+
+async function readerStateForBook(bookId) {
+  const db = await getReaderDb();
+  const position = allRows(db, "SELECT * FROM reading_positions WHERE book_id = $bookId LIMIT 1", { $bookId: bookId })[0] ?? null;
+  const annotations = allRows(db, "SELECT * FROM annotations WHERE book_id = $bookId ORDER BY page_index ASC, created_at ASC", { $bookId: bookId });
+  const bookmarks = allRows(db, "SELECT * FROM bookmarks WHERE book_id = $bookId ORDER BY page_index ASC, created_at ASC", { $bookId: bookId });
+  return { position, annotations, bookmarks };
+}
+
+function annotationById(db, id) {
+  return allRows(db, "SELECT * FROM annotations WHERE id = $id LIMIT 1", { $id: id })[0] ?? null;
+}
+
+async function saveAnnotation(annotation) {
+  if (!annotation?.bookId) throw new Error("No book is open.");
+  if (!annotation.blockId || !annotation.selectedText) throw new Error("Select text before saving an annotation.");
+  const db = await getReaderDb();
+  const now = new Date().toISOString();
+  const id = annotation.id || crypto.randomUUID();
+  run(
+    db,
+    `INSERT INTO annotations (id, book_id, page_index, side, block_id, start_offset, end_offset, selected_text, color, note, created_at, updated_at)
+     VALUES ($id, $bookId, $pageIndex, $side, $blockId, $startOffset, $endOffset, $selectedText, $color, $note, $now, $now)
+     ON CONFLICT(id) DO UPDATE SET
+       page_index = excluded.page_index,
+       side = excluded.side,
+       block_id = excluded.block_id,
+       start_offset = excluded.start_offset,
+       end_offset = excluded.end_offset,
+       selected_text = excluded.selected_text,
+       color = excluded.color,
+       note = excluded.note,
+       updated_at = excluded.updated_at`,
+    {
+      $id: id,
+      $bookId: annotation.bookId,
+      $pageIndex: Number(annotation.pageIndex || 0),
+      $side: String(annotation.side || "translation"),
+      $blockId: String(annotation.blockId),
+      $startOffset: Number(annotation.startOffset || 0),
+      $endOffset: Number(annotation.endOffset || 0),
+      $selectedText: String(annotation.selectedText),
+      $color: annotation.color || "#fde68a",
+      $note: annotation.note || null,
+      $now: now
+    }
+  );
+  saveReaderDb();
+  return annotationById(db, id);
+}
+
+async function deleteAnnotation(id) {
+  if (!id) return false;
+  const db = await getReaderDb();
+  run(db, "DELETE FROM annotations WHERE id = $id", { $id: id });
+  saveReaderDb();
+  return true;
+}
+
+async function exportBookData(bookId) {
+  const db = await getReaderDb();
+  const book = allRows(db, "SELECT * FROM books WHERE id = $bookId LIMIT 1", { $bookId: bookId })[0];
+  if (!book) throw new Error("No local reader data was found for this book.");
+  const state = await readerStateForBook(bookId);
+  const payload = {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    book: {
+      id: book.id,
+      fingerprint: book.fingerprint,
+      title: book.title,
+      filePath: book.file_path,
+      sourceKind: book.source_kind,
+      pageCount: book.page_count,
+      manifest: JSON.parse(book.manifest_json)
+    },
+    readingPosition: state.position,
+    annotations: state.annotations,
+    bookmarks: state.bookmarks
+  };
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: "Export reader data",
+    defaultPath: `${safeFileName(book.title || "mirook-book")}.mirook-notes.json`,
+    filters: [{ name: "Mirook Notes JSON", extensions: ["json"] }]
+  });
+  if (result.canceled || !result.filePath) return null;
+  fs.writeFileSync(result.filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return result.filePath;
+}
+
+async function getAiSettings() {
+  const db = await getReaderDb();
+  const raw = oneValue(db, "SELECT value FROM app_settings WHERE key = 'liara_ai' LIMIT 1");
+  if (!raw) return { url: "", apiKey: "", model: "openai/gpt-5-nano" };
+  try {
+    const parsed = JSON.parse(String(raw));
+    return {
+      url: typeof parsed.url === "string" ? parsed.url : "",
+      apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
+      model: typeof parsed.model === "string" && parsed.model ? parsed.model : "openai/gpt-5-nano"
+    };
+  } catch {
+    return { url: "", apiKey: "", model: "openai/gpt-5-nano" };
+  }
+}
+
+async function saveAiSettings(settings) {
+  const db = await getReaderDb();
+  const normalized = {
+    url: String(settings?.url || "").trim(),
+    apiKey: String(settings?.apiKey || "").trim(),
+    model: String(settings?.model || "openai/gpt-5-nano").trim()
+  };
+  run(
+    db,
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ('liara_ai', $value, $updatedAt)
+     ON CONFLICT(key) DO UPDATE SET
+       value = excluded.value,
+       updated_at = excluded.updated_at`,
+    {
+      $value: JSON.stringify(normalized),
+      $updatedAt: new Date().toISOString()
+    }
+  );
+  saveReaderDb();
+  return normalized;
+}
+
+function safeFileName(value) {
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").replace(/\s+/g, " ").trim().slice(0, 120) || "mirook-book";
 }
 
 function decodeEntities(text) {
@@ -270,7 +517,9 @@ function orderedHtmlPaths(entries, opfEntry) {
 
 async function readMirookBook(filePath) {
   const SQL = await getSql();
-  const db = new SQL.Database(fs.readFileSync(filePath));
+  const fileBytes = fs.readFileSync(filePath);
+  const fingerprint = crypto.createHash("sha256").update(fileBytes).digest("hex");
+  const db = new SQL.Database(fileBytes);
   try {
     const encryption = oneValue(db, "SELECT value FROM book_info WHERE key = $key LIMIT 1", { $key: "encryption" });
     if (encryption) {
@@ -291,14 +540,18 @@ async function readMirookBook(filePath) {
 
     const epubPages = sourceKind === "epub" && sourceBytes ? await parseEpub(sourceBytes) : [];
     const sourcePdf = sourceKind === "pdf" && sourceBytes ? dataUrl(sourceBytes, "application/pdf") : null;
-    return {
+    const payload = {
       filePath,
-      id: crypto.createHash("sha1").update(filePath).digest("hex"),
+      id: fingerprint,
+      fingerprint,
       manifest,
       pages,
       epubPages,
       sourcePdf
     };
+    await upsertBookRecord(payload);
+    payload.readerState = await readerStateForBook(payload.id);
+    return payload;
   } finally {
     db.close();
   }
@@ -330,6 +583,40 @@ ipcMain.handle("window:toggleZoom", () => {
   mainWindow.maximize();
   return true;
 });
+
+ipcMain.handle("reader:savePosition", async (_event, position) => {
+  if (!position?.bookId) return false;
+  const db = await getReaderDb();
+  run(
+    db,
+    `INSERT INTO reading_positions (book_id, page_index, view_mode, font_size, scroll_original, scroll_translation, updated_at)
+     VALUES ($bookId, $pageIndex, $viewMode, $fontSize, $scrollOriginal, $scrollTranslation, $updatedAt)
+     ON CONFLICT(book_id) DO UPDATE SET
+       page_index = excluded.page_index,
+       view_mode = excluded.view_mode,
+       font_size = excluded.font_size,
+       scroll_original = excluded.scroll_original,
+       scroll_translation = excluded.scroll_translation,
+       updated_at = excluded.updated_at`,
+    {
+      $bookId: position.bookId,
+      $pageIndex: Number(position.pageIndex || 0),
+      $viewMode: String(position.viewMode || "split"),
+      $fontSize: position.fontSize == null ? null : Number(position.fontSize),
+      $scrollOriginal: Number(position.scrollOriginal || 0),
+      $scrollTranslation: Number(position.scrollTranslation || 0),
+      $updatedAt: new Date().toISOString()
+    }
+  );
+  saveReaderDb();
+  return true;
+});
+
+ipcMain.handle("reader:exportBookData", async (_event, bookId) => exportBookData(bookId));
+ipcMain.handle("reader:saveAnnotation", async (_event, annotation) => saveAnnotation(annotation));
+ipcMain.handle("reader:deleteAnnotation", async (_event, id) => deleteAnnotation(id));
+ipcMain.handle("settings:getAi", async () => getAiSettings());
+ipcMain.handle("settings:saveAi", async (_event, settings) => saveAiSettings(settings));
 
 app.whenReady().then(() => {
   createWindow();
