@@ -108,8 +108,8 @@ export function App() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-cream text-ink">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-paper/90 px-8">
-        <div className="flex min-w-0 items-center gap-4">
+      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-line bg-paper/90 py-0 pl-[88px] pr-6">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <LogoMark />
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold">{hasBook ? title : "Mirook Reader"}</h1>
@@ -119,7 +119,7 @@ export function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setFontSize((value) => Math.max(14, value - 1))}
@@ -142,7 +142,7 @@ export function App() {
             type="button"
             onClick={openBook}
             disabled={isOpening}
-            className="ml-2 inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-sm hover:bg-black disabled:opacity-55"
+            className="ml-2 inline-flex h-10 min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-sm hover:bg-black disabled:opacity-55"
           >
             {isOpening ? <Loader2 className="animate-spin" size={18} /> : <FolderOpen size={18} />}
             Open MRBK
@@ -154,7 +154,7 @@ export function App() {
         <div className="mx-8 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}
 
-      <main ref={scrollRef} className="paper-scroll min-h-0 flex-1 overflow-auto px-8 py-7">
+      <main ref={scrollRef} className="min-h-0 flex-1 overflow-hidden px-8 py-7">
         {!book ? (
           <EmptyState isOpening={isOpening} onOpen={openBook} />
         ) : (
@@ -220,14 +220,14 @@ function ReaderLayout({
     <div
       className={
         viewMode === "split"
-          ? "mx-auto grid max-w-[1480px] grid-cols-2 gap-5"
-          : "mx-auto grid max-w-[900px] grid-cols-1"
+          ? "mx-auto grid h-full min-h-0 max-w-[1480px] grid-cols-2 gap-5"
+          : "mx-auto grid h-full min-h-0 max-w-[900px] grid-cols-1"
       }
     >
       {showOriginal ? (
-        <Paper title="Original" pageIndex={pageIndex}>
+        <Paper key={`original-${pageIndex}`} title="Original" pageIndex={pageIndex}>
           {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
-            <iframe src={book.sourcePdf} className="h-[72vh] w-full rounded-lg border border-line bg-white" title="Original PDF" />
+            <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
           ) : sourceBlocks?.length ? (
             <BlockFlow blocks={sourceBlocks} fontSize={fontSize} direction="ltr" />
           ) : (
@@ -237,13 +237,13 @@ function ReaderLayout({
       ) : null}
 
       {showTranslation ? (
-        <Paper title="Translation" pageIndex={pageIndex}>
+        <Paper key={`translation-${pageIndex}`} title="Translation" pageIndex={pageIndex}>
           {page?.isBlank ? (
-            <div className="flex min-h-[55vh] items-center justify-center text-center text-muted">Blank source page</div>
+            <div className="flex h-full min-h-[420px] items-center justify-center text-center text-muted">Blank source page</div>
           ) : translatedBlocks.length ? (
             <DisplayFlow blocks={translatedBlocks} fontSize={fontSize} />
           ) : (
-            <div className="flex min-h-[55vh] items-center justify-center text-center text-muted">No translation for this page yet.</div>
+            <div className="flex h-full min-h-[420px] items-center justify-center text-center text-muted">No translation for this page yet.</div>
           )}
         </Paper>
       ) : null}
@@ -253,12 +253,12 @@ function ReaderLayout({
 
 function Paper({ title, pageIndex, children }: { title: string; pageIndex: number; children: React.ReactNode }) {
   return (
-    <section className="min-w-0 overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
-      <div className="flex items-center justify-between border-b border-line bg-paper px-6 py-4">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
+      <div className="flex shrink-0 items-center justify-between border-b border-line bg-paper px-6 py-4">
         <h2 className="text-sm font-semibold">{title}</h2>
         <span className="text-sm text-muted">Page {pageIndex + 1}</span>
       </div>
-      <div className="min-h-[68vh] bg-white px-12 py-10">{children}</div>
+      <div className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10">{children}</div>
     </section>
   );
 }
@@ -342,14 +342,14 @@ function ModeSwitch({ value, onChange, disabled }: { value: ViewMode; onChange: 
   ];
 
   return (
-    <div className="ml-3 inline-flex rounded-xl border border-line bg-white p-1">
+    <div className="ml-3 inline-flex shrink-0 rounded-xl border border-line bg-white p-1">
       {modes.map((mode) => (
         <button
           type="button"
           key={mode.value}
           disabled={disabled}
           onClick={() => onChange(mode.value)}
-          className={`inline-flex h-8 items-center gap-2 rounded-lg px-3 text-xs font-semibold ${
+          className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-lg px-3 text-xs font-semibold ${
             value === mode.value ? "bg-ink text-white" : "text-muted hover:bg-cream"
           } disabled:opacity-35`}
         >
@@ -383,13 +383,9 @@ function EmptyState({ isOpening, onOpen }: { isOpening: boolean; onOpen: () => v
 }
 
 function LogoMark({ large = false }: { large?: boolean }) {
-  const size = large ? "h-16 w-16" : "h-9 w-9";
+  const size = large ? "h-20 w-20" : "h-10 w-10";
   return (
-    <div className={`${size} relative shrink-0`}>
-      <svg viewBox="0 0 64 64" aria-hidden="true" className="h-full w-full">
-        <path d="M10 48V16l22 21 22-21v32" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6" />
-      </svg>
-    </div>
+    <img src="/mirook-logo-mark.png" alt="" aria-hidden="true" className={`${size} shrink-0 object-contain`} />
   );
 }
 
