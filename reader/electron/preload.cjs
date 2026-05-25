@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("mirook", {
   exportBookData: (bookId) => ipcRenderer.invoke("reader:exportBookData", bookId),
   saveAnnotation: (annotation) => ipcRenderer.invoke("reader:saveAnnotation", annotation),
   deleteAnnotation: (id) => ipcRenderer.invoke("reader:deleteAnnotation", id),
+  summarizePages: (request) => ipcRenderer.invoke("reader:summarizePages", request),
   getAiSettings: () => ipcRenderer.invoke("settings:getAi"),
   saveAiSettings: (settings) => ipcRenderer.invoke("settings:saveAi", settings)
 });

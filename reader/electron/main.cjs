@@ -161,6 +161,16 @@ async function getReaderDb() {
       value TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS ai_summaries (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      start_page INTEGER NOT NULL,
+      end_page INTEGER NOT NULL,
+      model TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
   `);
   saveReaderDb();
   return readerDb;
@@ -207,7 +217,8 @@ async function readerStateForBook(bookId) {
   const position = allRows(db, "SELECT * FROM reading_positions WHERE book_id = $bookId LIMIT 1", { $bookId: bookId })[0] ?? null;
   const annotations = allRows(db, "SELECT * FROM annotations WHERE book_id = $bookId ORDER BY page_index ASC, created_at ASC", { $bookId: bookId });
   const bookmarks = allRows(db, "SELECT * FROM bookmarks WHERE book_id = $bookId ORDER BY page_index ASC, created_at ASC", { $bookId: bookId });
-  return { position, annotations, bookmarks };
+  const summaries = allRows(db, "SELECT * FROM ai_summaries WHERE book_id = $bookId ORDER BY created_at DESC", { $bookId: bookId });
+  return { position, annotations, bookmarks, summaries };
 }
 
 function annotationById(db, id) {
@@ -279,7 +290,8 @@ async function exportBookData(bookId) {
     },
     readingPosition: state.position,
     annotations: state.annotations,
-    bookmarks: state.bookmarks
+    bookmarks: state.bookmarks,
+    summaries: state.summaries
   };
 
   const result = await dialog.showSaveDialog(mainWindow, {
@@ -329,6 +341,80 @@ async function saveAiSettings(settings) {
   );
   saveReaderDb();
   return normalized;
+}
+
+async function summarizePages(request) {
+  if (!request?.bookId) throw new Error("No book is open.");
+  const settings = await getAiSettings();
+  if (!settings.url) throw new Error("Add a Liara URL in Settings first.");
+  if (!settings.apiKey) throw new Error("Add a Liara API key in Settings first.");
+
+  const inputText = String(request.text || "").trim();
+  if (!inputText) throw new Error("No text was found in this page range.");
+
+  const model = settings.model || "openai/gpt-5-nano";
+  const response = await fetch(chatCompletionsUrl(settings.url), {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${settings.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content: "You summarize book passages for a Persian reader. Write concise, useful Persian summaries. Preserve important names, terms, and concrete ideas."
+        },
+        {
+          role: "user",
+          content: `این متن از صفحه ${request.startPage} تا ${request.endPage} کتاب است. یک خلاصه فارسی منظم و کاربردی بده:\n\n${inputText}`
+        }
+      ]
+    })
+  });
+
+  const payloadText = await response.text();
+  let payload;
+  try {
+    payload = payloadText ? JSON.parse(payloadText) : {};
+  } catch {
+    payload = { raw: payloadText };
+  }
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.message || payloadText || `AI request failed with status ${response.status}.`;
+    throw new Error(message);
+  }
+
+  const summary = payload?.choices?.[0]?.message?.content?.trim();
+  if (!summary) throw new Error("The AI response did not include a summary.");
+
+  const db = await getReaderDb();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  run(
+    db,
+    `INSERT INTO ai_summaries (id, book_id, start_page, end_page, model, summary, created_at)
+     VALUES ($id, $bookId, $startPage, $endPage, $model, $summary, $createdAt)`,
+    {
+      $id: id,
+      $bookId: request.bookId,
+      $startPage: Number(request.startPage || 1),
+      $endPage: Number(request.endPage || request.startPage || 1),
+      $model: model,
+      $summary: summary,
+      $createdAt: now
+    }
+  );
+  saveReaderDb();
+  return allRows(db, "SELECT * FROM ai_summaries WHERE id = $id LIMIT 1", { $id: id })[0];
+}
+
+function chatCompletionsUrl(url) {
+  const trimmed = String(url || "").trim().replace(/\/+$/, "");
+  if (/\/chat\/completions$/i.test(trimmed)) return trimmed;
+  if (/\/v1$/i.test(trimmed)) return `${trimmed}/chat/completions`;
+  return `${trimmed}/v1/chat/completions`;
 }
 
 function safeFileName(value) {
@@ -615,6 +701,7 @@ ipcMain.handle("reader:savePosition", async (_event, position) => {
 ipcMain.handle("reader:exportBookData", async (_event, bookId) => exportBookData(bookId));
 ipcMain.handle("reader:saveAnnotation", async (_event, annotation) => saveAnnotation(annotation));
 ipcMain.handle("reader:deleteAnnotation", async (_event, id) => deleteAnnotation(id));
+ipcMain.handle("reader:summarizePages", async (_event, request) => summarizePages(request));
 ipcMain.handle("settings:getAi", async () => getAiSettings());
 ipcMain.handle("settings:saveAi", async (_event, settings) => saveAiSettings(settings));
 

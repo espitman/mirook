@@ -15,13 +15,14 @@ import {
   Plus,
   Save,
   Settings,
+  Sparkles,
   StickyNote,
   Trash2,
   X
 } from "lucide-react";
 import type { DisplayBlock } from "./readerBlocks";
-import { pageAlignedSourceBlocks, sourceDisplayBlocks, sourcePlainText, translatedDisplayBlocks } from "./readerBlocks";
-import type { AnnotationSide, EpubBlock, LiaraAiSettings, MirookBookPayload, ReaderAnnotation, TranslatedTextPage } from "./types";
+import { pageAlignedSourceBlocks, sourceDisplayBlocks, sourcePlainText, translatedDisplayBlocks, translationParagraphs } from "./readerBlocks";
+import type { AnnotationSide, EpubBlock, LiaraAiSettings, MirookBookPayload, ReaderAnnotation, ReaderSummary, TranslatedTextPage } from "./types";
 
 type ViewMode = "split" | "original" | "translation";
 type SelectionState = {
@@ -38,6 +39,7 @@ type SwipeDirection = "previous" | "next";
 type WheelSwipeState = { deltaX: number; deltaY: number; triggered: boolean; resetId: number | null };
 type NotePopoverPosition = { left: number; top: number; width: number; arrowLeft: number; placement: "above" | "below" };
 type NotePopoverAnchor = { x: number; y: number };
+type AiTab = "new" | "generated";
 
 const HIGHLIGHT_COLORS = [
   { label: "Yellow", value: "#fde68a" },
@@ -67,6 +69,10 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
   const [aiSettings, setAiSettings] = useState<LiaraAiSettings>({ url: "", apiKey: "", model: AI_MODELS[0].value });
+  const [aiOpen, setAiOpen] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaries, setSummaries] = useState<ReaderSummary[]>([]);
+  const [latestSummary, setLatestSummary] = useState<ReaderSummary | null>(null);
   const [isOpening, setIsOpening] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const wheelSwipeRef = useRef<WheelSwipeState>({ deltaX: 0, deltaY: 0, triggered: false, resetId: null });
@@ -243,6 +249,8 @@ export function App() {
 
     setBook(payload);
     setAnnotations(payload.readerState?.annotations ?? []);
+    setSummaries(payload.readerState?.summaries ?? []);
+    setLatestSummary(null);
     setPageIndex(restoredPageIndex);
     setViewMode(isViewMode(savedViewMode) ? savedViewMode : "split");
     if (Number.isFinite(savedFontSize) && savedFontSize >= 14 && savedFontSize <= 36) setFontSize(savedFontSize);
@@ -325,6 +333,30 @@ export function App() {
 
   function closeSettings() {
     setSettingsOpen(false);
+  }
+
+  async function summarizePageRange(startPage: number, endPage: number) {
+    if (!book) return;
+    setError(null);
+    setNotice(null);
+    setIsSummarizing(true);
+    try {
+      const start = Math.min(startPage, endPage);
+      const end = Math.max(startPage, endPage);
+      const text = summaryTextForRange(book, start, end);
+      const summary = await window.mirook.summarizePages({
+        bookId: book.id,
+        startPage: start,
+        endPage: end,
+        text
+      });
+      setLatestSummary(summary);
+      setSummaries((items) => [summary, ...items.filter((item) => item.id !== summary.id)]);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsSummarizing(false);
+    }
   }
 
   function handleSwipePage(direction: SwipeDirection) {
@@ -437,6 +469,15 @@ export function App() {
           </button>
           <button
             type="button"
+            onClick={() => setAiOpen(true)}
+            disabled={!hasBook}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream disabled:opacity-35"
+            title="AI"
+          >
+            <Sparkles size={18} />
+          </button>
+          <button
+            type="button"
             onClick={openBook}
             disabled={isOpening}
             className="ml-2 inline-flex h-10 min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-sm hover:bg-black disabled:opacity-55"
@@ -503,6 +544,18 @@ export function App() {
           settings={aiSettings}
           onClose={closeSettings}
           onSave={saveAiSettings}
+        />
+      ) : null}
+
+      {aiOpen ? (
+        <AiDialog
+          pageIndex={pageIndex}
+          pageCount={pageCount}
+          isSummarizing={isSummarizing}
+          latestSummary={latestSummary}
+          summaries={summaries}
+          onClose={() => setAiOpen(false)}
+          onSummarize={summarizePageRange}
         />
       ) : null}
 
@@ -1112,6 +1165,233 @@ function SettingsDialog({
   );
 }
 
+function AiDialog({
+  pageIndex,
+  pageCount,
+  isSummarizing,
+  latestSummary,
+  summaries,
+  onClose,
+  onSummarize
+}: {
+  pageIndex: number;
+  pageCount: number;
+  isSummarizing: boolean;
+  latestSummary: ReaderSummary | null;
+  summaries: ReaderSummary[];
+  onClose: () => void;
+  onSummarize: (startPage: number, endPage: number) => void;
+}) {
+  const [startPage, setStartPage] = useState(pageIndex + 1);
+  const [endPage, setEndPage] = useState(Math.min(pageCount || 1, pageIndex + 1));
+  const [activeTab, setActiveTab] = useState<AiTab>("new");
+  const [selectedSummaryId, setSelectedSummaryId] = useState<string | null>(null);
+  const selectedSummary = summaries.find((summary) => summary.id === selectedSummaryId) ?? summaries[0] ?? null;
+
+  useEffect(() => {
+    setStartPage(pageIndex + 1);
+    setEndPage(Math.min(pageCount || 1, pageIndex + 1));
+  }, [pageIndex, pageCount]);
+
+  useEffect(() => {
+    if (latestSummary) {
+      setActiveTab("new");
+      setSelectedSummaryId(latestSummary.id);
+    }
+  }, [latestSummary]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSummarize(clampPageNumber(startPage, pageCount), clampPageNumber(endPage, pageCount));
+  }
+
+  return (
+    <div className="app-no-drag fixed bottom-0 left-0 right-0 top-16 z-50 flex items-center justify-center bg-black/25 px-5 py-5" onMouseDown={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onMouseDown={(event) => event.stopPropagation()}
+        className="flex max-h-full w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-line bg-paper px-5 py-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold">
+              <Sparkles size={18} />
+              AI Summary
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-muted">Generate Persian summaries and revisit saved outputs.</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-cream">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="border-b border-line bg-white px-5 py-3">
+          <div className="grid grid-cols-2 rounded-xl bg-cream p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("new")}
+            className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${activeTab === "new" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"}`}
+          >
+            New summary
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("generated")}
+            className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${activeTab === "generated" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"}`}
+          >
+            Generated
+            {summaries.length ? <span className="ml-2 rounded-full bg-ink/10 px-2 py-0.5 text-xs text-ink">{summaries.length}</span> : null}
+          </button>
+          </div>
+        </div>
+
+        {activeTab === "new" ? (
+          <div className="flex min-h-0 flex-1 flex-col p-5">
+            <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-3">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-ink">Start page</span>
+                <input
+                  value={startPage}
+                  onChange={(event) => setStartPage(Number(event.target.value))}
+                  type="number"
+                  min={1}
+                  max={Math.max(pageCount, 1)}
+                  className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-ink">End page</span>
+                <input
+                  value={endPage}
+                  onChange={(event) => setEndPage(Number(event.target.value))}
+                  type="number"
+                  min={1}
+                  max={Math.max(pageCount, 1)}
+                  className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={isSummarizing}
+                className="inline-flex h-11 items-center gap-2 rounded-xl bg-ink px-5 text-sm font-semibold text-white hover:bg-black disabled:opacity-55"
+              >
+                {isSummarizing ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                Summarize
+              </button>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-line bg-paper px-4 py-3 text-xs font-medium leading-5 text-muted">
+              After generation, the summary is saved automatically in this book's local database.
+            </div>
+
+            <div className="paper-scroll mt-5 min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-paper p-4">
+              {latestSummary ? (
+                <SummaryArticle summary={latestSummary} />
+              ) : (
+                <div className="flex min-h-32 items-center justify-center text-center text-sm leading-6 text-muted">
+                  Choose a range and summarize it.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0">
+            <div className="paper-scroll min-h-0 overflow-auto border-r border-line bg-paper p-3">
+              {summaries.length ? (
+                summaries.map((summary) => (
+                  <button
+                    key={summary.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSummaryId(summary.id);
+                      setStartPage(summary.start_page);
+                      setEndPage(summary.end_page);
+                    }}
+                    className={`mb-2 block w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                      selectedSummary?.id === summary.id ? "border-ink bg-ink text-white shadow-sm" : "border-transparent bg-white/70 text-ink hover:bg-white"
+                    }`}
+                  >
+                    <span className={`block text-xs font-semibold ${selectedSummary?.id === summary.id ? "text-white/65" : "text-muted"}`}>
+                      Page {summary.start_page} / {summary.end_page}
+                    </span>
+                    <SummaryListTitle title={summaryTitle(summary)} />
+                  </button>
+                ))
+              ) : (
+                <div className="flex h-full min-h-32 items-center justify-center px-4 text-center text-sm leading-6 text-muted">
+                  No generated content yet.
+                </div>
+              )}
+            </div>
+            <div className="paper-scroll min-h-0 overflow-auto bg-white p-5">
+              {selectedSummary ? (
+                <SummaryArticle summary={selectedSummary} />
+              ) : (
+                <div className="flex h-full min-h-32 items-center justify-center text-center text-sm leading-6 text-muted">
+                  Select a generated summary.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function SummaryArticle({ summary }: { summary: ReaderSummary }) {
+  return (
+    <article>
+      <div className="mb-2 text-xs font-semibold text-muted">
+        Page {summary.start_page} / {summary.end_page} · {summary.model}
+      </div>
+      <p className="whitespace-pre-wrap text-right font-vazir text-sm leading-7 text-ink" dir="rtl">{summary.summary}</p>
+    </article>
+  );
+}
+
+function SummaryListTitle({ title }: { title: string }) {
+  const containerRef = useRef<HTMLSpanElement | null>(null);
+  const textRef = useRef<HTMLSpanElement | null>(null);
+  const [overflowDistance, setOverflowDistance] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      const container = containerRef.current;
+      const text = textRef.current;
+      if (!container || !text) return;
+      const textWidth = text.getBoundingClientRect().width;
+      setOverflowDistance(Math.max(0, Math.ceil(textWidth - container.clientWidth + 16)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (containerRef.current) observer.observe(containerRef.current);
+    if (textRef.current) observer.observe(textRef.current);
+    return () => observer.disconnect();
+  }, [title]);
+
+  return (
+    <span ref={containerRef} className="summary-title-marquee mt-1 block text-right font-vazir text-sm font-semibold leading-6" dir="rtl">
+      <span
+        ref={textRef}
+        className={overflowDistance ? "summary-title-marquee-text" : ""}
+        style={{ "--summary-title-distance": `${overflowDistance}px` } as CSSProperties}
+      >
+        {title}
+      </span>
+    </span>
+  );
+}
+
+function summaryTitle(summary: ReaderSummary) {
+  const firstLine = summary.summary
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return `Summary ${summary.start_page}-${summary.end_page}`;
+  return firstLine.replace(/^[-•\s]+/, "").slice(0, 64);
+}
+
 function NotesPanel({
   annotations,
   currentPageIndex,
@@ -1277,6 +1557,31 @@ function isViewMode(value: unknown): value is ViewMode {
 function clampPageIndex(index: number, pageCount: number) {
   if (!pageCount) return 0;
   return Math.min(pageCount - 1, Math.max(0, Math.trunc(index)));
+}
+
+function clampPageNumber(pageNumber: number, pageCount: number) {
+  if (!pageCount) return 1;
+  const normalized = Number.isFinite(pageNumber) ? Math.trunc(pageNumber) : 1;
+  return Math.min(pageCount, Math.max(1, normalized));
+}
+
+function summaryTextForRange(book: MirookBookPayload, startPage: number, endPage: number) {
+  const startIndex = clampPageNumber(startPage, book.manifest.pageCount) - 1;
+  const endIndex = clampPageNumber(endPage, book.manifest.pageCount) - 1;
+  const first = Math.min(startIndex, endIndex);
+  const last = Math.max(startIndex, endIndex);
+
+  return book.pages
+    .filter((page) => page.pageIndex >= first && page.pageIndex <= last)
+    .map((page) => {
+      const translated = translationParagraphs(page).join("\n\n").trim();
+      const sourceBlocks = pageAlignedSourceBlocks(book.epubPages, page);
+      const source = sourcePlainText(sourceBlocks, page.sourceText ?? "");
+      const text = translated || source;
+      return text ? `Page ${page.pageIndex + 1}\n${text}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
 }
 
 function normalizedHighlightColor(color?: string | null) {

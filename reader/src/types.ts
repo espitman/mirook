@@ -66,6 +66,7 @@ export interface ReaderState {
   position?: ReadingPosition | null;
   annotations?: ReaderAnnotation[];
   bookmarks?: unknown[];
+  summaries?: ReaderSummary[];
 }
 
 export interface SaveReadingPositionInput {
@@ -113,6 +114,23 @@ export interface LiaraAiSettings {
   model: string;
 }
 
+export interface ReaderSummary {
+  id: string;
+  book_id: string;
+  start_page: number;
+  end_page: number;
+  model: string;
+  summary: string;
+  created_at?: string;
+}
+
+export interface SummarizePagesInput {
+  bookId: string;
+  startPage: number;
+  endPage: number;
+  text: string;
+}
+
 export interface MirookBridge {
   openBook: () => Promise<MirookBookPayload | null>;
   openBookPath: (filePath: string) => Promise<MirookBookPayload>;
@@ -122,6 +140,7 @@ export interface MirookBridge {
   exportBookData: (bookId: string) => Promise<string | null>;
   saveAnnotation: (annotation: SaveAnnotationInput) => Promise<ReaderAnnotation>;
   deleteAnnotation: (id: string) => Promise<boolean>;
+  summarizePages: (request: SummarizePagesInput) => Promise<ReaderSummary>;
   getAiSettings: () => Promise<LiaraAiSettings>;
   saveAiSettings: (settings: LiaraAiSettings) => Promise<LiaraAiSettings>;
 }
