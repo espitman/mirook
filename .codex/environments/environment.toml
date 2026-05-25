@@ -9,3 +9,8 @@ script = ""
 name = "Run"
 icon = "run"
 command = "/Users/espitman/Documents/Projects/Mirook/macos/run.sh"
+
+[[actions]]
+name = "Reader"
+icon = "run"
+command = "/Users/espitman/Documents/Projects/Mirook/reader/run.sh"
