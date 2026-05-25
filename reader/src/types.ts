@@ -53,4 +53,6 @@ export interface MirookBookPayload {
 export interface MirookBridge {
   openBook: () => Promise<MirookBookPayload | null>;
   openBookPath: (filePath: string) => Promise<MirookBookPayload>;
+  getPathForFile: (file: File) => string;
+  toggleWindowZoom: () => Promise<boolean>;
 }

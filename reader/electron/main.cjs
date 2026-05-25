@@ -321,6 +321,16 @@ ipcMain.handle("book:openPath", async (_event, filePath) => {
   return readMirookBook(filePath);
 });
 
+ipcMain.handle("window:toggleZoom", () => {
+  if (!mainWindow) return false;
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+    return false;
+  }
+  mainWindow.maximize();
+  return true;
+});
+
 app.whenReady().then(() => {
   createWindow();
   app.on("activate", () => {

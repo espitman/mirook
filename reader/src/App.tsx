@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { BookOpen, ChevronLeft, ChevronRight, FileText, FolderOpen, Loader2, Minus, PanelLeftClose, Plus } from "lucide-react";
 import type { DisplayBlock } from "./readerBlocks";
-import { sourcePlainText, translatedDisplayBlocks } from "./readerBlocks";
+import { pageAlignedSourceBlocks, sourceDisplayBlocks, sourcePlainText, translatedDisplayBlocks } from "./readerBlocks";
 import type { EpubBlock, MirookBookPayload, TranslatedTextPage } from "./types";
 
 type ViewMode = "split" | "original" | "translation";
@@ -17,8 +18,7 @@ export function App() {
 
   const pageCount = book?.manifest.pageCount ?? 0;
   const page = useMemo(() => book?.pages.find((item) => item.pageIndex === pageIndex), [book, pageIndex]);
-  const epubPage = book?.epubPages[pageIndex];
-  const sourceBlocks = epubPage?.blocks;
+  const sourceBlocks = useMemo(() => pageAlignedSourceBlocks(book?.epubPages, page), [book?.epubPages, page]);
   const title = book?.manifest.displayName ?? "Mirook Reader";
   const sourceKind = String(book?.manifest.sourceKind ?? "pdf").toLowerCase();
   const hasBook = Boolean(book);
@@ -36,6 +36,15 @@ export function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!hasBook) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("button, a, input, select, textarea")) return;
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        document.querySelectorAll<HTMLElement>("[data-reader-scroll-pane]").forEach((element) => {
+          element.scrollBy({ top: direction * 76, behavior: "smooth" });
+        });
+      }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         setPageIndex((value) => Math.max(0, value - 1));
@@ -59,12 +68,17 @@ export function App() {
     };
     const onDrop = async (event: DragEvent) => {
       event.preventDefault();
-      const file = event.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined;
-      if (!file?.path) {
+      const file = event.dataTransfer?.files?.[0];
+      const filePath = file ? window.mirook.getPathForFile(file) : "";
+      if (!filePath) {
         setError("Electron could not read the dropped file path. Use Open MRBK.");
         return;
       }
-      await openPath(file.path);
+      if (!filePath.toLowerCase().endsWith(".mrbk")) {
+        setError("Please drop a .mrbk file.");
+        return;
+      }
+      await openPath(filePath);
     };
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("drop", onDrop);
@@ -106,9 +120,19 @@ export function App() {
     }
   }
 
+  async function handleHeaderDoubleClick(event: ReactMouseEvent<HTMLElement>) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest("button, a, input, select, textarea, [data-window-control]")) return;
+    await window.mirook.toggleWindowZoom();
+  }
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-cream text-ink">
-      <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-line bg-paper/90 py-0 pl-[88px] pr-6">
+      <header
+        onDoubleClick={handleHeaderDoubleClick}
+        className="app-drag-region flex h-16 shrink-0 items-center justify-between gap-4 border-b border-line bg-paper/90 py-0 pl-[88px] pr-6"
+      >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <LogoMark />
           <div className="min-w-0">
@@ -119,7 +143,7 @@ export function App() {
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="app-no-drag flex shrink-0 items-center gap-2" data-window-control>
           <button
             type="button"
             onClick={() => setFontSize((value) => Math.max(14, value - 1))}
@@ -212,6 +236,7 @@ function ReaderLayout({
   viewMode: ViewMode;
 }) {
   const translatedBlocks = translatedDisplayBlocks(sourceBlocks, page);
+  const originalBlocks = sourceDisplayBlocks(sourceBlocks, page);
   const sourceText = sourcePlainText(sourceBlocks, page?.sourceText ?? "");
   const showOriginal = viewMode === "split" || viewMode === "original";
   const showTranslation = viewMode === "split" || viewMode === "translation";
@@ -228,10 +253,12 @@ function ReaderLayout({
         <Paper key={`original-${pageIndex}`} title="Original" pageIndex={pageIndex}>
           {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
             <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
-          ) : sourceBlocks?.length ? (
-            <BlockFlow blocks={sourceBlocks} fontSize={fontSize} direction="ltr" />
+          ) : originalBlocks.length ? (
+            <BlockFlow blocks={originalBlocks} fontSize={fontSize} direction="ltr" />
+          ) : page?.isBlank || !sourceText ? (
+            <div className="h-full min-h-[420px]" />
           ) : (
-            <TextFlow text={sourceText || "No source text for this page."} fontSize={fontSize} direction="ltr" />
+            <TextFlow text={sourceText} fontSize={fontSize} direction="ltr" />
           )}
         </Paper>
       ) : null}
@@ -239,7 +266,7 @@ function ReaderLayout({
       {showTranslation ? (
         <Paper key={`translation-${pageIndex}`} title="Translation" pageIndex={pageIndex}>
           {page?.isBlank ? (
-            <div className="flex h-full min-h-[420px] items-center justify-center text-center text-muted">Blank source page</div>
+            <div className="h-full min-h-[420px]" />
           ) : translatedBlocks.length ? (
             <DisplayFlow blocks={translatedBlocks} fontSize={fontSize} />
           ) : (
@@ -251,14 +278,24 @@ function ReaderLayout({
   );
 }
 
-function Paper({ title, pageIndex, children }: { title: string; pageIndex: number; children: React.ReactNode }) {
+function Paper({
+  title,
+  pageIndex,
+  children
+}: {
+  title: string;
+  pageIndex: number;
+  children: ReactNode;
+}) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
       <div className="flex shrink-0 items-center justify-between border-b border-line bg-paper px-6 py-4">
         <h2 className="text-sm font-semibold">{title}</h2>
         <span className="text-sm text-muted">Page {pageIndex + 1}</span>
       </div>
-      <div className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10">{children}</div>
+      <div data-reader-scroll-pane className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10">
+        {children}
+      </div>
     </section>
   );
 }
@@ -289,27 +326,43 @@ function DisplayFlow({ blocks, fontSize }: { blocks: DisplayBlock[]; fontSize: n
   );
 }
 
-function BlockFlow({ blocks, fontSize, direction }: { blocks: EpubBlock[]; fontSize: number; direction: "rtl" | "ltr" }) {
+function BlockFlow({ blocks, fontSize, direction }: { blocks: (EpubBlock | DisplayBlock)[]; fontSize: number; direction: "rtl" | "ltr" }) {
   return (
     <div className={direction === "rtl" ? "font-vazir" : "font-serif"} dir={direction} style={{ fontSize, lineHeight: 1.75 }}>
-      {blocks.map((block, index) => {
-        if (block.type === "image") return <BookImage key={index} src={block.src} alt={block.altText ?? ""} />;
-        if (block.type === "link") {
-          return (
-            <p key={index} className="mb-5">
-              <a className="text-blue-700 underline" href={block.href}>
-                {block.title}
-              </a>
-            </p>
-          );
-        }
-        return (
-          <p key={index} className="mb-5 whitespace-pre-wrap">
-            {block.text}
-          </p>
-        );
-      })}
+      {blocks.map((block, index) => (
+        <Block key={index} block={block} fontSize={fontSize} direction={direction} />
+      ))}
     </div>
+  );
+}
+
+function Block({
+  block,
+  fontSize,
+  direction
+}: {
+  block: EpubBlock | DisplayBlock;
+  fontSize: number;
+  direction: "rtl" | "ltr";
+}) {
+  if (block.type === "image") return <BookImage src={block.src} alt={block.altText ?? ""} compact />;
+  const textStyle: CSSProperties = { fontSize, lineHeight: direction === "rtl" ? 2.05 : 1.75 };
+  const className = direction === "rtl" ? "font-vazir mb-5 whitespace-pre-wrap text-right" : "font-serif mb-5 whitespace-pre-wrap";
+
+  if (block.type === "link") {
+    return (
+      <p className={className} dir={direction} style={textStyle}>
+        <a className="text-blue-700 underline" href={block.href}>
+          {block.title}
+        </a>
+      </p>
+    );
+  }
+
+  return (
+    <p className={className} dir={direction} style={textStyle}>
+      {block.text}
+    </p>
   );
 }
 
@@ -325,9 +378,9 @@ function TextFlow({ text, fontSize, direction }: { text: string; fontSize: numbe
   );
 }
 
-function BookImage({ src, alt }: { src: string; alt: string }) {
+function BookImage({ src, alt, compact = false }: { src: string; alt: string; compact?: boolean }) {
   return (
-    <figure className="my-8 flex w-full flex-col items-center">
+    <figure className={`${compact ? "my-0" : "my-8"} flex w-full flex-col items-center`}>
       <img src={src} alt={alt} className="max-h-[640px] max-w-full object-contain" />
       {alt ? <figcaption className="mt-2 text-center text-sm text-muted">{alt}</figcaption> : null}
     </figure>
@@ -335,7 +388,7 @@ function BookImage({ src, alt }: { src: string; alt: string }) {
 }
 
 function ModeSwitch({ value, onChange, disabled }: { value: ViewMode; onChange: (value: ViewMode) => void; disabled: boolean }) {
-  const modes: { value: ViewMode; label: string; icon: React.ReactNode }[] = [
+  const modes: { value: ViewMode; label: string; icon: ReactNode }[] = [
     { value: "original", label: "Original", icon: <FileText size={16} /> },
     { value: "split", label: "Split", icon: <PanelLeftClose size={16} /> },
     { value: "translation", label: "Translation", icon: <BookOpen size={16} /> }

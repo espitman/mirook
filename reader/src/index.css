@@ -37,6 +37,15 @@ input {
   box-sizing: border-box;
 }
 
+.app-drag-region {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag,
+.app-no-drag * {
+  -webkit-app-region: no-drag;
+}
+
 .paper-scroll {
   scrollbar-width: thin;
   scrollbar-color: #cfc7ba transparent;
