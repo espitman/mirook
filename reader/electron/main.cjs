@@ -168,12 +168,22 @@ async function getReaderDb() {
       end_page INTEGER NOT NULL,
       model TEXT NOT NULL,
       summary TEXT NOT NULL,
+      output_type TEXT NOT NULL DEFAULT 'summary',
+      title TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
     );
   `);
+  ensureColumn(readerDb, "ai_summaries", "output_type", "TEXT NOT NULL DEFAULT 'summary'");
+  ensureColumn(readerDb, "ai_summaries", "title", "TEXT");
   saveReaderDb();
   return readerDb;
+}
+
+function ensureColumn(db, table, column, definition) {
+  const columns = allRows(db, `PRAGMA table_info(${table})`);
+  if (columns.some((row) => row.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function saveReaderDb() {
@@ -271,6 +281,14 @@ async function deleteAnnotation(id) {
   return true;
 }
 
+async function deleteAiOutput(id) {
+  if (!id) return false;
+  const db = await getReaderDb();
+  run(db, "DELETE FROM ai_summaries WHERE id = $id", { $id: id });
+  saveReaderDb();
+  return true;
+}
+
 async function exportBookData(bookId) {
   const db = await getReaderDb();
   const book = allRows(db, "SELECT * FROM books WHERE id = $bookId LIMIT 1", { $bookId: bookId })[0];
@@ -353,6 +371,61 @@ async function summarizePages(request) {
   if (!inputText) throw new Error("No text was found in this page range.");
 
   const model = settings.model || "openai/gpt-5-nano";
+  const summary = await requestAiCompletion(settings, [
+    {
+      role: "system",
+      content: "You summarize book passages for a Persian reader. Write concise, useful Persian summaries. Preserve important names, terms, and concrete ideas."
+    },
+    {
+      role: "user",
+      content: `این متن از صفحه ${request.startPage} تا ${request.endPage} کتاب است. یک خلاصه فارسی منظم و کاربردی بده:\n\n${inputText}`
+    }
+  ]);
+
+  return saveAiOutput({
+    bookId: request.bookId,
+    startPage: Number(request.startPage || 1),
+    endPage: Number(request.endPage || request.startPage || 1),
+    model,
+    summary,
+    outputType: "summary",
+    title: `Summary ${request.startPage}-${request.endPage}`
+  });
+}
+
+async function generateTextFromNotes(request) {
+  if (!request?.bookId) throw new Error("No book is open.");
+  const settings = await getAiSettings();
+  if (!settings.url) throw new Error("Add a Liara URL in Settings first.");
+  if (!settings.apiKey) throw new Error("Add a Liara API key in Settings first.");
+
+  const inputText = String(request.text || "").trim();
+  if (!inputText) throw new Error("No notes or highlights matched this filter.");
+
+  const model = settings.model || "openai/gpt-5-nano";
+  const summary = await requestAiCompletion(settings, [
+    {
+      role: "system",
+      content: "You turn a reader's notes and highlights into a coherent Persian text. Use the notes as the main signal, preserve key quoted ideas, and avoid inventing facts."
+    },
+    {
+      role: "user",
+      content: `از یادداشت‌ها و هایلایت‌های زیر یک متن فارسی منسجم، خواندنی و کاربردی بساز. متن را با تیتر کوتاه شروع کن و بعد چند پاراگراف منظم بنویس:\n\n${inputText}`
+    }
+  ]);
+
+  return saveAiOutput({
+    bookId: request.bookId,
+    startPage: Number(request.startPage || 1),
+    endPage: Number(request.endPage || request.startPage || 1),
+    model,
+    summary,
+    outputType: "notes",
+    title: `Notes ${request.startPage}-${request.endPage}`
+  });
+}
+
+async function requestAiCompletion(settings, messages) {
   const response = await fetch(chatCompletionsUrl(settings.url), {
     method: "POST",
     headers: {
@@ -360,17 +433,8 @@ async function summarizePages(request) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: "You summarize book passages for a Persian reader. Write concise, useful Persian summaries. Preserve important names, terms, and concrete ideas."
-        },
-        {
-          role: "user",
-          content: `این متن از صفحه ${request.startPage} تا ${request.endPage} کتاب است. یک خلاصه فارسی منظم و کاربردی بده:\n\n${inputText}`
-        }
-      ]
+      model: settings.model || "openai/gpt-5-nano",
+      messages
     })
   });
 
@@ -388,21 +452,26 @@ async function summarizePages(request) {
 
   const summary = payload?.choices?.[0]?.message?.content?.trim();
   if (!summary) throw new Error("The AI response did not include a summary.");
+  return summary;
+}
 
+async function saveAiOutput({ bookId, startPage, endPage, model, summary, outputType, title }) {
   const db = await getReaderDb();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   run(
     db,
-    `INSERT INTO ai_summaries (id, book_id, start_page, end_page, model, summary, created_at)
-     VALUES ($id, $bookId, $startPage, $endPage, $model, $summary, $createdAt)`,
+    `INSERT INTO ai_summaries (id, book_id, start_page, end_page, model, summary, output_type, title, created_at)
+     VALUES ($id, $bookId, $startPage, $endPage, $model, $summary, $outputType, $title, $createdAt)`,
     {
       $id: id,
-      $bookId: request.bookId,
-      $startPage: Number(request.startPage || 1),
-      $endPage: Number(request.endPage || request.startPage || 1),
+      $bookId: bookId,
+      $startPage: startPage,
+      $endPage: endPage,
       $model: model,
       $summary: summary,
+      $outputType: outputType,
+      $title: title,
       $createdAt: now
     }
   );
@@ -702,6 +771,8 @@ ipcMain.handle("reader:exportBookData", async (_event, bookId) => exportBookData
 ipcMain.handle("reader:saveAnnotation", async (_event, annotation) => saveAnnotation(annotation));
 ipcMain.handle("reader:deleteAnnotation", async (_event, id) => deleteAnnotation(id));
 ipcMain.handle("reader:summarizePages", async (_event, request) => summarizePages(request));
+ipcMain.handle("reader:generateTextFromNotes", async (_event, request) => generateTextFromNotes(request));
+ipcMain.handle("reader:deleteAiOutput", async (_event, id) => deleteAiOutput(id));
 ipcMain.handle("settings:getAi", async () => getAiSettings());
 ipcMain.handle("settings:saveAi", async (_event, settings) => saveAiSettings(settings));
 

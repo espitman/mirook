@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, WheelEvent as ReactWheelEvent } from "react";
+import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   BookOpen,
   ChevronLeft,
@@ -35,11 +35,10 @@ type SelectionState = {
   endOffset: number;
   selectedText: string;
 };
-type SwipeDirection = "previous" | "next";
-type WheelSwipeState = { deltaX: number; deltaY: number; triggered: boolean; resetId: number | null };
 type NotePopoverPosition = { left: number; top: number; width: number; arrowLeft: number; placement: "above" | "below" };
 type NotePopoverAnchor = { x: number; y: number };
-type AiTab = "new" | "generated";
+type AiDialogMode = "create" | "generated";
+type AiTab = "new" | "notes";
 
 const HIGHLIGHT_COLORS = [
   { label: "Yellow", value: "#fde68a" },
@@ -70,12 +69,15 @@ export function App() {
   const [settingsMounted, setSettingsMounted] = useState(false);
   const [aiSettings, setAiSettings] = useState<LiaraAiSettings>({ url: "", apiKey: "", model: AI_MODELS[0].value });
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiMounted, setAiMounted] = useState(false);
+  const [aiDialogMode, setAiDialogMode] = useState<AiDialogMode>("create");
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [isGeneratingNotesText, setIsGeneratingNotesText] = useState(false);
   const [summaries, setSummaries] = useState<ReaderSummary[]>([]);
   const [latestSummary, setLatestSummary] = useState<ReaderSummary | null>(null);
   const [isOpening, setIsOpening] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const wheelSwipeRef = useRef<WheelSwipeState>({ deltaX: 0, deltaY: 0, triggered: false, resetId: null });
 
   const pageCount = book?.manifest.pageCount ?? 0;
   const page = useMemo(() => book?.pages.find((item) => item.pageIndex === pageIndex), [book, pageIndex]);
@@ -119,6 +121,26 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!aiMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-ai-menu]")) return;
+      setAiMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [aiMenuOpen]);
+
+  useEffect(() => {
+    if (aiOpen) {
+      setAiMounted(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setAiMounted(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [aiOpen]);
 
   useEffect(() => {
     if (!book) return;
@@ -335,6 +357,19 @@ export function App() {
     setSettingsOpen(false);
   }
 
+  function openAiDialog(mode: AiDialogMode) {
+    setAiDialogMode(mode);
+    setAiMounted(true);
+    setAiOpen(false);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setAiOpen(true));
+    });
+  }
+
+  function closeAiDialog() {
+    setAiOpen(false);
+  }
+
   async function summarizePageRange(startPage: number, endPage: number) {
     if (!book) return;
     setError(null);
@@ -359,33 +394,39 @@ export function App() {
     }
   }
 
-  function handleSwipePage(direction: SwipeDirection) {
-    setSelection(null);
-    setPageIndex((value) => {
-      if (direction === "previous") return Math.max(0, value - 1);
-      return Math.min(pageCount - 1, value + 1);
-    });
+  async function generateTextFromNotes(startPage: number, endPage: number, color: string | null, notesOnly: boolean) {
+    if (!book) return;
+    setError(null);
+    setNotice(null);
+    setIsGeneratingNotesText(true);
+    try {
+      const start = Math.min(startPage, endPage);
+      const end = Math.max(startPage, endPage);
+      const text = notesTextForRange(annotations, start, end, color, notesOnly);
+      const output = await window.mirook.generateTextFromNotes({
+        bookId: book.id,
+        startPage: start,
+        endPage: end,
+        text
+      });
+      setLatestSummary(output);
+      setSummaries((items) => [output, ...items.filter((item) => item.id !== output.id)]);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsGeneratingNotesText(false);
+    }
   }
 
-  function handleWheelSwipe(event: ReactWheelEvent<HTMLElement>) {
-    if (!isWheelSwipeAllowed(event)) return;
-    const state = wheelSwipeRef.current;
-    state.deltaX += event.deltaX;
-    state.deltaY += event.deltaY;
-    if (state.resetId) window.clearTimeout(state.resetId);
-    state.resetId = window.setTimeout(() => {
-      wheelSwipeRef.current = { deltaX: 0, deltaY: 0, triggered: false, resetId: null };
-    }, 110);
-
-    if (state.triggered) {
-      event.preventDefault();
-      return;
+  async function deleteAiOutput(id: string) {
+    setError(null);
+    try {
+      await window.mirook.deleteAiOutput(id);
+      setSummaries((items) => items.filter((item) => item.id !== id));
+      setLatestSummary((item) => (item?.id === id ? null : item));
+    } catch (err) {
+      setError(errorMessage(err));
     }
-
-    if (Math.abs(state.deltaX) < 82 || Math.abs(state.deltaX) < Math.abs(state.deltaY) * 1.35) return;
-    state.triggered = true;
-    event.preventDefault();
-    handleSwipePage(state.deltaX < 0 ? "previous" : "next");
   }
 
   async function handleHeaderDoubleClick(event: ReactMouseEvent<HTMLElement>) {
@@ -467,15 +508,45 @@ export function App() {
           >
             <Settings size={18} />
           </button>
-          <button
-            type="button"
-            onClick={() => setAiOpen(true)}
-            disabled={!hasBook}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream disabled:opacity-35"
-            title="AI"
-          >
-            <Sparkles size={18} />
-          </button>
+          <div className="relative" data-ai-menu>
+            <button
+              type="button"
+              onClick={() => setAiMenuOpen((value) => !value)}
+              disabled={!hasBook}
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line hover:bg-cream disabled:opacity-35 ${
+                aiMenuOpen ? "bg-ink text-white hover:bg-black" : "bg-white"
+              }`}
+              title="AI"
+            >
+              <Sparkles size={18} />
+            </button>
+            {aiMenuOpen ? (
+              <div className="absolute right-0 top-12 z-50 w-48 rounded-xl border border-line bg-white p-1.5 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    openAiDialog("create");
+                    setAiMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-cream"
+                >
+                  <Sparkles size={16} />
+                  Create
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openAiDialog("generated");
+                    setAiMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-cream"
+                >
+                  <FileText size={16} />
+                  View generated
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={openBook}
@@ -510,7 +581,6 @@ export function App() {
             notesColorFilter={notesColorFilter}
             notesOpen={notesOpen}
             onSelectionContextMenu={handleSelectionContextMenu}
-            onWheelSwipe={handleWheelSwipe}
             onNotesColorFilterChange={setNotesColorFilter}
             onDeleteAnnotation={deleteAnnotation}
             onGoToAnnotation={(annotation) => {
@@ -547,15 +617,21 @@ export function App() {
         />
       ) : null}
 
-      {aiOpen ? (
+      {aiMounted ? (
         <AiDialog
+          mode={aiDialogMode}
+          open={aiOpen}
           pageIndex={pageIndex}
           pageCount={pageCount}
           isSummarizing={isSummarizing}
           latestSummary={latestSummary}
           summaries={summaries}
-          onClose={() => setAiOpen(false)}
+          annotations={annotations}
+          isGeneratingNotesText={isGeneratingNotesText}
+          onClose={closeAiDialog}
           onSummarize={summarizePageRange}
+          onGenerateFromNotes={generateTextFromNotes}
+          onDeleteAiOutput={deleteAiOutput}
         />
       ) : null}
 
@@ -584,7 +660,6 @@ function ReaderLayout({
   notesColorFilter,
   notesOpen,
   onSelectionContextMenu,
-  onWheelSwipe,
   onNotesColorFilterChange,
   onDeleteAnnotation,
   onGoToAnnotation
@@ -599,7 +674,6 @@ function ReaderLayout({
   notesColorFilter: string | null;
   notesOpen: boolean;
   onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
-  onWheelSwipe: (event: ReactWheelEvent<HTMLElement>) => void;
   onNotesColorFilterChange: (color: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   onGoToAnnotation: (annotation: ReaderAnnotation) => void;
@@ -627,7 +701,6 @@ function ReaderLayout({
             pageIndex={pageIndex}
             side="original"
             onSelectionContextMenu={onSelectionContextMenu}
-            onWheelSwipe={onWheelSwipe}
           >
             {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
               <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
@@ -648,7 +721,6 @@ function ReaderLayout({
             pageIndex={pageIndex}
             side="translation"
             onSelectionContextMenu={onSelectionContextMenu}
-            onWheelSwipe={onWheelSwipe}
           >
             {page?.isBlank ? (
               <div className="h-full min-h-[420px]" />
@@ -740,14 +812,12 @@ function Paper({
   pageIndex,
   side,
   onSelectionContextMenu,
-  onWheelSwipe,
   children
 }: {
   title: string;
   pageIndex: number;
   side: AnnotationSide;
   onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
-  onWheelSwipe: (event: ReactWheelEvent<HTMLElement>) => void;
   children: ReactNode;
 }) {
   return (
@@ -759,7 +829,6 @@ function Paper({
       <div
         data-reader-scroll-pane
         onContextMenu={(event) => onSelectionContextMenu(side, pageIndex, event)}
-        onWheel={onWheelSwipe}
         className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10"
       >
         {children}
@@ -1166,67 +1235,113 @@ function SettingsDialog({
 }
 
 function AiDialog({
+  mode,
+  open,
   pageIndex,
   pageCount,
   isSummarizing,
   latestSummary,
   summaries,
+  annotations,
+  isGeneratingNotesText,
   onClose,
-  onSummarize
+  onSummarize,
+  onGenerateFromNotes,
+  onDeleteAiOutput
 }: {
+  mode: AiDialogMode;
+  open: boolean;
   pageIndex: number;
   pageCount: number;
   isSummarizing: boolean;
   latestSummary: ReaderSummary | null;
   summaries: ReaderSummary[];
+  annotations: ReaderAnnotation[];
+  isGeneratingNotesText: boolean;
   onClose: () => void;
   onSummarize: (startPage: number, endPage: number) => void;
+  onGenerateFromNotes: (startPage: number, endPage: number, color: string | null, notesOnly: boolean) => void;
+  onDeleteAiOutput: (id: string) => void;
 }) {
   const [startPage, setStartPage] = useState(pageIndex + 1);
   const [endPage, setEndPage] = useState(Math.min(pageCount || 1, pageIndex + 1));
+  const [notesStartPage, setNotesStartPage] = useState(pageIndex + 1);
+  const [notesEndPage, setNotesEndPage] = useState(Math.min(pageCount || 1, pageIndex + 1));
+  const [notesColorFilter, setNotesColorFilter] = useState<string | null>(null);
+  const [notesOnly, setNotesOnly] = useState(false);
   const [activeTab, setActiveTab] = useState<AiTab>("new");
   const [selectedSummaryId, setSelectedSummaryId] = useState<string | null>(null);
   const selectedSummary = summaries.find((summary) => summary.id === selectedSummaryId) ?? summaries[0] ?? null;
+  const pageSummaries = summaries.filter((summary) => outputType(summary) === "summary");
+  const noteOutputs = summaries.filter((summary) => outputType(summary) === "notes");
+  const matchingNotesCount = notesForRange(annotations, notesStartPage, notesEndPage, notesColorFilter, notesOnly).length;
 
   useEffect(() => {
     setStartPage(pageIndex + 1);
     setEndPage(Math.min(pageCount || 1, pageIndex + 1));
+    setNotesStartPage(pageIndex + 1);
+    setNotesEndPage(Math.min(pageCount || 1, pageIndex + 1));
   }, [pageIndex, pageCount]);
 
   useEffect(() => {
     if (latestSummary) {
-      setActiveTab("new");
+      setActiveTab(latestSummary.output_type === "notes" ? "notes" : "new");
       setSelectedSummaryId(latestSummary.id);
     }
   }, [latestSummary]);
 
+  useEffect(() => {
+    if (mode === "create") setActiveTab("new");
+  }, [mode]);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (activeTab === "notes") {
+      onGenerateFromNotes(
+        clampPageNumber(notesStartPage, pageCount),
+        clampPageNumber(notesEndPage, pageCount),
+        notesColorFilter,
+        notesOnly
+      );
+      return;
+    }
     onSummarize(clampPageNumber(startPage, pageCount), clampPageNumber(endPage, pageCount));
   }
 
   return (
-    <div className="app-no-drag fixed bottom-0 left-0 right-0 top-16 z-50 flex items-center justify-center bg-black/25 px-5 py-5" onMouseDown={onClose}>
+    <div
+      data-open={open}
+      className={`ai-modal-backdrop app-no-drag fixed bottom-0 left-0 right-0 top-16 z-50 flex items-center justify-center bg-black/25 px-5 py-5 transition-opacity duration-200 ${
+        open ? "opacity-100" : "opacity-0"
+      }`}
+      onMouseDown={onClose}
+    >
       <form
         onSubmit={handleSubmit}
         onMouseDown={(event) => event.stopPropagation()}
-        className="flex max-h-full w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl"
+        data-open={open}
+        className={`ai-modal-panel flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl transition duration-200 ease-out ${
+          mode === "generated" ? "max-w-[75vw]" : "max-w-[760px]"
+        } ${open ? "translate-y-0 scale-100 opacity-100" : "translate-y-3 scale-[0.98] opacity-0"}`}
       >
         <div className="flex items-start justify-between gap-4 border-b border-line bg-paper px-5 py-4">
           <div>
             <h2 className="flex items-center gap-2 text-base font-semibold">
               <Sparkles size={18} />
-              AI Summary
+              {mode === "create" ? "AI Create" : "Generated"}
             </h2>
-            <p className="mt-1 text-sm leading-6 text-muted">Generate Persian summaries and revisit saved outputs.</p>
+            <p className="mt-1 text-sm leading-6 text-muted">
+              {mode === "create" ? "Generate Persian summaries or texts from notes." : "Review saved AI outputs for this book."}
+            </p>
           </div>
           <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-cream">
             <X size={18} />
           </button>
         </div>
 
-        <div className="border-b border-line bg-white px-5 py-3">
-          <div className="grid grid-cols-2 rounded-xl bg-cream p-1">
+        {mode === "create" ? (
+          <div className="border-b border-line bg-white px-5 py-3">
+            <div className="grid grid-cols-2 rounded-xl bg-cream p-1">
           <button
             type="button"
             onClick={() => setActiveTab("new")}
@@ -1236,16 +1351,25 @@ function AiDialog({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("generated")}
-            className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${activeTab === "generated" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"}`}
+            onClick={() => setActiveTab("notes")}
+            className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${activeTab === "notes" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"}`}
           >
-            Generated
-            {summaries.length ? <span className="ml-2 rounded-full bg-ink/10 px-2 py-0.5 text-xs text-ink">{summaries.length}</span> : null}
+            From notes
           </button>
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        {activeTab === "new" ? (
+        {mode === "generated" ? (
+          <GeneratedOutputsView
+            summaries={summaries}
+            selectedSummary={selectedSummary}
+            pageSummaries={pageSummaries}
+            noteOutputs={noteOutputs}
+            onSelect={(summary) => setSelectedSummaryId(summary.id)}
+            onDelete={onDeleteAiOutput}
+          />
+        ) : activeTab === "new" ? (
           <div className="flex min-h-0 flex-1 flex-col p-5">
             <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-3">
               <label className="block">
@@ -1295,40 +1419,86 @@ function AiDialog({
             </div>
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0">
-            <div className="paper-scroll min-h-0 overflow-auto border-r border-line bg-paper p-3">
-              {summaries.length ? (
-                summaries.map((summary) => (
-                  <button
-                    key={summary.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedSummaryId(summary.id);
-                      setStartPage(summary.start_page);
-                      setEndPage(summary.end_page);
-                    }}
-                    className={`mb-2 block w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
-                      selectedSummary?.id === summary.id ? "border-ink bg-ink text-white shadow-sm" : "border-transparent bg-white/70 text-ink hover:bg-white"
-                    }`}
-                  >
-                    <span className={`block text-xs font-semibold ${selectedSummary?.id === summary.id ? "text-white/65" : "text-muted"}`}>
-                      Page {summary.start_page} / {summary.end_page}
-                    </span>
-                    <SummaryListTitle title={summaryTitle(summary)} />
-                  </button>
-                ))
-              ) : (
-                <div className="flex h-full min-h-32 items-center justify-center px-4 text-center text-sm leading-6 text-muted">
-                  No generated content yet.
-                </div>
-              )}
+          <div className="flex min-h-0 flex-1 flex-col p-5">
+            <div className="grid grid-cols-[1fr_1fr] gap-3">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-ink">Start page</span>
+                <input
+                  value={notesStartPage}
+                  onChange={(event) => setNotesStartPage(Number(event.target.value))}
+                  type="number"
+                  min={1}
+                  max={Math.max(pageCount, 1)}
+                  className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-ink">End page</span>
+                <input
+                  value={notesEndPage}
+                  onChange={(event) => setNotesEndPage(Number(event.target.value))}
+                  type="number"
+                  min={1}
+                  max={Math.max(pageCount, 1)}
+                  className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+                />
+              </label>
             </div>
-            <div className="paper-scroll min-h-0 overflow-auto bg-white p-5">
-              {selectedSummary ? (
-                <SummaryArticle summary={selectedSummary} />
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setNotesColorFilter(null)}
+                className={`h-8 rounded-full border px-3 text-xs font-semibold ${
+                  notesColorFilter === null ? "border-ink bg-ink text-white" : "border-line bg-white text-muted hover:bg-cream"
+                }`}
+              >
+                All colors
+              </button>
+              {HIGHLIGHT_COLORS.map((color) => (
+                <button
+                  key={color.value}
+                  type="button"
+                  onClick={() => setNotesColorFilter(color.value)}
+                  className={`h-8 w-8 rounded-full border ${
+                    notesColorFilter === color.value ? "border-ink ring-2 ring-ink/20" : "border-line hover:ring-2 hover:ring-ink/10"
+                  }`}
+                  style={{ backgroundColor: color.value }}
+                  title={color.label}
+                />
+              ))}
+              <label className="ml-auto inline-flex h-8 items-center gap-2 rounded-full border border-line bg-white px-3 text-xs font-semibold text-muted">
+                <input
+                  type="checkbox"
+                  checked={notesOnly}
+                  onChange={(event) => setNotesOnly(event.target.checked)}
+                  className="h-4 w-4 accent-neutral-900"
+                />
+                Only notes
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-line bg-paper px-4 py-3 text-sm leading-6 text-muted">
+              {matchingNotesCount} matching {notesOnly ? "notes" : "highlights and notes"} will be used. The generated text is saved automatically.
+            </div>
+
+            <div className="mt-5 flex items-center justify-end">
+              <button
+                type="submit"
+                disabled={isGeneratingNotesText || !matchingNotesCount}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-white hover:bg-black disabled:opacity-55"
+              >
+                {isGeneratingNotesText ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                Generate text
+              </button>
+            </div>
+
+            <div className="paper-scroll mt-5 min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-paper p-4">
+              {latestSummary?.output_type === "notes" ? (
+                <SummaryArticle summary={latestSummary} />
               ) : (
-                <div className="flex h-full min-h-32 items-center justify-center text-center text-sm leading-6 text-muted">
-                  Select a generated summary.
+                <div className="flex min-h-32 items-center justify-center text-center text-sm leading-6 text-muted">
+                  Pick note filters and generate a text from your reading marks.
                 </div>
               )}
             </div>
@@ -1347,6 +1517,115 @@ function SummaryArticle({ summary }: { summary: ReaderSummary }) {
       </div>
       <p className="whitespace-pre-wrap text-right font-vazir text-sm leading-7 text-ink" dir="rtl">{summary.summary}</p>
     </article>
+  );
+}
+
+function GeneratedOutputsView({
+  summaries,
+  selectedSummary,
+  pageSummaries,
+  noteOutputs,
+  onSelect,
+  onDelete
+}: {
+  summaries: ReaderSummary[];
+  selectedSummary: ReaderSummary | null;
+  pageSummaries: ReaderSummary[];
+  noteOutputs: ReaderSummary[];
+  onSelect: (summary: ReaderSummary) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0">
+      <div className="paper-scroll min-h-0 overflow-auto border-r border-line bg-paper p-3">
+        {summaries.length ? (
+          <>
+            <GeneratedSummaryGroup
+              title="Page summaries"
+              items={pageSummaries}
+              selectedId={selectedSummary?.id ?? null}
+              onSelect={onSelect}
+              onDelete={onDelete}
+            />
+            <GeneratedSummaryGroup
+              title="From notes"
+              items={noteOutputs}
+              selectedId={selectedSummary?.id ?? null}
+              onSelect={onSelect}
+              onDelete={onDelete}
+            />
+          </>
+        ) : (
+          <div className="flex h-full min-h-32 items-center justify-center px-4 text-center text-sm leading-6 text-muted">
+            No generated content yet.
+          </div>
+        )}
+      </div>
+      <div className="paper-scroll min-h-0 overflow-auto bg-white p-5">
+        {selectedSummary ? (
+          <SummaryArticle summary={selectedSummary} />
+        ) : (
+          <div className="flex h-full min-h-32 items-center justify-center text-center text-sm leading-6 text-muted">
+            Select a generated output.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GeneratedSummaryGroup({
+  title,
+  items,
+  selectedId,
+  onSelect,
+  onDelete
+}: {
+  title: string;
+  items: ReaderSummary[];
+  selectedId: string | null;
+  onSelect: (summary: ReaderSummary) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <section className="mb-4">
+      <h3 className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-muted">{title}</h3>
+      {items.map((summary) => {
+        const isSelected = selectedId === summary.id;
+        return (
+          <article
+            key={summary.id}
+            className={`group mb-2 rounded-xl border px-3 py-3 text-sm transition ${
+              isSelected ? "border-ink bg-ink text-white shadow-sm" : "border-transparent bg-white/70 text-ink hover:bg-white"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => onSelect(summary)}
+              className="block w-full text-left"
+            >
+              <span className={`block text-xs font-semibold ${isSelected ? "text-white/65" : "text-muted"}`}>
+                Page {summary.start_page} / {summary.end_page}
+              </span>
+              <SummaryListTitle title={summaryTitle(summary)} />
+            </button>
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => onDelete(summary.id)}
+                className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-semibold ${
+                  isSelected ? "text-white/75 hover:bg-white/10" : "text-red-700 hover:bg-red-50"
+                }`}
+              >
+                <Trash2 size={13} />
+                Delete
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </section>
   );
 }
 
@@ -1384,12 +1663,17 @@ function SummaryListTitle({ title }: { title: string }) {
 }
 
 function summaryTitle(summary: ReaderSummary) {
+  if (summary.title?.trim()) return summary.title.trim();
   const firstLine = summary.summary
     .split(/\n+/)
     .map((line) => line.trim())
     .find(Boolean);
   if (!firstLine) return `Summary ${summary.start_page}-${summary.end_page}`;
   return firstLine.replace(/^[-•\s]+/, "").slice(0, 64);
+}
+
+function outputType(summary: ReaderSummary) {
+  return summary.output_type === "notes" ? "notes" : "summary";
 }
 
 function NotesPanel({
@@ -1584,6 +1868,42 @@ function summaryTextForRange(book: MirookBookPayload, startPage: number, endPage
     .join("\n\n---\n\n");
 }
 
+function notesForRange(
+  annotations: ReaderAnnotation[],
+  startPage: number,
+  endPage: number,
+  color: string | null,
+  notesOnly: boolean
+) {
+  const startIndex = Math.min(startPage, endPage) - 1;
+  const endIndex = Math.max(startPage, endPage) - 1;
+  return annotations
+    .filter((annotation) => annotation.page_index >= startIndex && annotation.page_index <= endIndex)
+    .filter((annotation) => !color || normalizedHighlightColor(annotation.color) === color)
+    .filter((annotation) => !notesOnly || Boolean(annotation.note?.trim()))
+    .sort((a, b) => a.page_index - b.page_index || String(a.created_at || "").localeCompare(String(b.created_at || "")));
+}
+
+function notesTextForRange(
+  annotations: ReaderAnnotation[],
+  startPage: number,
+  endPage: number,
+  color: string | null,
+  notesOnly: boolean
+) {
+  return notesForRange(annotations, startPage, endPage, color, notesOnly)
+    .map((annotation, index) => {
+      const note = annotation.note?.trim();
+      const selectedText = annotation.selected_text?.trim();
+      return [
+        `Item ${index + 1} · Page ${annotation.page_index + 1} · ${annotation.side}`,
+        selectedText ? `Highlight: ${selectedText}` : "",
+        note ? `Note: ${note}` : ""
+      ].filter(Boolean).join("\n");
+    })
+    .join("\n\n---\n\n");
+}
+
 function normalizedHighlightColor(color?: string | null) {
   return color || HIGHLIGHT_COLORS[0].value;
 }
@@ -1599,13 +1919,6 @@ function textBlockId(side: AnnotationSide, pageIndex: number, blockIndex: number
 
 function annotationsForBlock(annotations: ReaderAnnotation[], blockId: string) {
   return annotations.filter((annotation) => annotation.block_id === blockId);
-}
-
-function isWheelSwipeAllowed(event: ReactWheelEvent<HTMLElement>) {
-  if (hasActiveTextSelection()) return false;
-  const target = event.target;
-  if (!(target instanceof Element)) return true;
-  return !target.closest("button, a, input, select, textarea, [data-selection-toolbar]");
 }
 
 function hasActiveTextSelection() {

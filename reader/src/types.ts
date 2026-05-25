@@ -121,10 +121,19 @@ export interface ReaderSummary {
   end_page: number;
   model: string;
   summary: string;
+  output_type?: "summary" | "notes" | string;
+  title?: string | null;
   created_at?: string;
 }
 
 export interface SummarizePagesInput {
+  bookId: string;
+  startPage: number;
+  endPage: number;
+  text: string;
+}
+
+export interface GenerateTextFromNotesInput {
   bookId: string;
   startPage: number;
   endPage: number;
@@ -141,6 +150,8 @@ export interface MirookBridge {
   saveAnnotation: (annotation: SaveAnnotationInput) => Promise<ReaderAnnotation>;
   deleteAnnotation: (id: string) => Promise<boolean>;
   summarizePages: (request: SummarizePagesInput) => Promise<ReaderSummary>;
+  generateTextFromNotes: (request: GenerateTextFromNotesInput) => Promise<ReaderSummary>;
+  deleteAiOutput: (id: string) => Promise<boolean>;
   getAiSettings: () => Promise<LiaraAiSettings>;
   saveAiSettings: (settings: LiaraAiSettings) => Promise<LiaraAiSettings>;
 }
