@@ -39,6 +39,7 @@ type NotePopoverPosition = { left: number; top: number; width: number; arrowLeft
 type NotePopoverAnchor = { x: number; y: number };
 type AiDialogMode = "create" | "generated";
 type AiTab = "new" | "notes";
+type SettingsTab = "ai" | "data";
 
 const HIGHLIGHT_COLORS = [
   { label: "Yellow", value: "#fde68a" },
@@ -55,7 +56,12 @@ const AI_MODELS = [
 export function App() {
   const [book, setBook] = useState<MirookBookPayload | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
-  const [fontSize, setFontSize] = useState(() => Number(localStorage.getItem("mirook-reader-font-size") ?? 22));
+  const [originalFontSize, setOriginalFontSize] = useState(() =>
+    Number(localStorage.getItem("mirook-reader-original-font-size") ?? localStorage.getItem("mirook-reader-font-size") ?? 22)
+  );
+  const [translationFontSize, setTranslationFontSize] = useState(() =>
+    Number(localStorage.getItem("mirook-reader-translation-font-size") ?? localStorage.getItem("mirook-reader-font-size") ?? 22)
+  );
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -65,6 +71,7 @@ export function App() {
   const [selectedHighlightColor, setSelectedHighlightColor] = useState(HIGHLIGHT_COLORS[0].value);
   const [notesColorFilter, setNotesColorFilter] = useState<string | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [notesMounted, setNotesMounted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
   const [aiSettings, setAiSettings] = useState<LiaraAiSettings>({ url: "", apiKey: "", model: AI_MODELS[0].value });
@@ -76,6 +83,7 @@ export function App() {
   const [isGeneratingNotesText, setIsGeneratingNotesText] = useState(false);
   const [summaries, setSummaries] = useState<ReaderSummary[]>([]);
   const [latestSummary, setLatestSummary] = useState<ReaderSummary | null>(null);
+  const [pendingDeleteAiOutputId, setPendingDeleteAiOutputId] = useState<string | null>(null);
   const [isOpening, setIsOpening] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -89,8 +97,12 @@ export function App() {
   const canGoNext = pageCount ? pageIndex < pageCount - 1 : false;
 
   useEffect(() => {
-    localStorage.setItem("mirook-reader-font-size", String(fontSize));
-  }, [fontSize]);
+    localStorage.setItem("mirook-reader-original-font-size", String(originalFontSize));
+  }, [originalFontSize]);
+
+  useEffect(() => {
+    localStorage.setItem("mirook-reader-translation-font-size", String(translationFontSize));
+  }, [translationFontSize]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -112,6 +124,15 @@ export function App() {
     const timeout = window.setTimeout(() => setSettingsMounted(false), 220);
     return () => window.clearTimeout(timeout);
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (notesOpen) {
+      setNotesMounted(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setNotesMounted(false), 300);
+    return () => window.clearTimeout(timeout);
+  }, [notesOpen]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -149,11 +170,11 @@ export function App() {
         bookId: book.id,
         pageIndex,
         viewMode,
-        fontSize
+        fontSize: translationFontSize
       });
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [book, pageIndex, viewMode, fontSize]);
+  }, [book, pageIndex, viewMode, translationFontSize]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
@@ -275,7 +296,10 @@ export function App() {
     setLatestSummary(null);
     setPageIndex(restoredPageIndex);
     setViewMode(isViewMode(savedViewMode) ? savedViewMode : "split");
-    if (Number.isFinite(savedFontSize) && savedFontSize >= 14 && savedFontSize <= 36) setFontSize(savedFontSize);
+    if (Number.isFinite(savedFontSize) && savedFontSize >= 14 && savedFontSize <= 36) {
+      setOriginalFontSize(savedFontSize);
+      setTranslationFontSize(savedFontSize);
+    }
   }
 
   async function exportBookData() {
@@ -424,6 +448,7 @@ export function App() {
       await window.mirook.deleteAiOutput(id);
       setSummaries((items) => items.filter((item) => item.id !== id));
       setLatestSummary((item) => (item?.id === id ? null : item));
+      setPendingDeleteAiOutputId(null);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -453,23 +478,6 @@ export function App() {
         </div>
 
         <div className="app-no-drag flex shrink-0 items-center gap-2" data-window-control>
-          <button
-            type="button"
-            onClick={() => setFontSize((value) => Math.max(14, value - 1))}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream"
-            title="Smaller text"
-          >
-            <Minus size={18} />
-          </button>
-          <span className="w-8 text-center text-sm text-muted">{fontSize}</span>
-          <button
-            type="button"
-            onClick={() => setFontSize((value) => Math.min(36, value + 1))}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream"
-            title="Larger text"
-          >
-            <Plus size={18} />
-          </button>
           <ModeSwitch value={viewMode} onChange={setViewMode} disabled={!hasBook} />
           <button
             type="button"
@@ -490,15 +498,6 @@ export function App() {
                 {annotations.length}
               </span>
             ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={exportBookData}
-            disabled={!hasBook}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-white hover:bg-cream disabled:opacity-35"
-            title="Export reader data"
-          >
-            <Download size={18} />
           </button>
           <button
             type="button"
@@ -575,11 +574,15 @@ export function App() {
             page={page}
             pageIndex={pageIndex}
             sourceBlocks={sourceBlocks}
-            fontSize={fontSize}
+            originalFontSize={originalFontSize}
+            translationFontSize={translationFontSize}
             viewMode={viewMode}
             annotations={annotations}
             notesColorFilter={notesColorFilter}
             notesOpen={notesOpen}
+            notesMounted={notesMounted}
+            onOriginalFontSizeChange={setOriginalFontSize}
+            onTranslationFontSizeChange={setTranslationFontSize}
             onSelectionContextMenu={handleSelectionContextMenu}
             onNotesColorFilterChange={setNotesColorFilter}
             onDeleteAnnotation={deleteAnnotation}
@@ -612,8 +615,10 @@ export function App() {
         <SettingsDialog
           open={settingsOpen}
           settings={aiSettings}
+          hasBook={hasBook}
           onClose={closeSettings}
           onSave={saveAiSettings}
+          onExportData={exportBookData}
         />
       ) : null}
 
@@ -631,7 +636,17 @@ export function App() {
           onClose={closeAiDialog}
           onSummarize={summarizePageRange}
           onGenerateFromNotes={generateTextFromNotes}
-          onDeleteAiOutput={deleteAiOutput}
+          onDeleteAiOutput={setPendingDeleteAiOutputId}
+        />
+      ) : null}
+
+      {pendingDeleteAiOutputId ? (
+        <ConfirmDialog
+          title="Delete generated output?"
+          body="This output will be removed from this book's local database."
+          confirmLabel="Delete"
+          onCancel={() => setPendingDeleteAiOutputId(null)}
+          onConfirm={() => deleteAiOutput(pendingDeleteAiOutputId)}
         />
       ) : null}
 
@@ -654,11 +669,15 @@ function ReaderLayout({
   page,
   pageIndex,
   sourceBlocks,
-  fontSize,
+  originalFontSize,
+  translationFontSize,
   viewMode,
   annotations,
   notesColorFilter,
   notesOpen,
+  notesMounted,
+  onOriginalFontSizeChange,
+  onTranslationFontSizeChange,
   onSelectionContextMenu,
   onNotesColorFilterChange,
   onDeleteAnnotation,
@@ -668,11 +687,15 @@ function ReaderLayout({
   page?: TranslatedTextPage;
   pageIndex: number;
   sourceBlocks?: EpubBlock[];
-  fontSize: number;
+  originalFontSize: number;
+  translationFontSize: number;
   viewMode: ViewMode;
   annotations: ReaderAnnotation[];
   notesColorFilter: string | null;
   notesOpen: boolean;
+  notesMounted: boolean;
+  onOriginalFontSizeChange: (value: number | ((current: number) => number)) => void;
+  onTranslationFontSizeChange: (value: number | ((current: number) => number)) => void;
   onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
   onNotesColorFilterChange: (color: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -686,12 +709,12 @@ function ReaderLayout({
   const pageAnnotations = annotations.filter((annotation) => annotation.page_index === pageIndex);
 
   return (
-    <div className={`mx-auto grid h-full min-h-0 max-w-[1720px] gap-5 ${notesOpen ? "grid-cols-[minmax(0,1fr)_320px]" : "grid-cols-1"}`}>
+    <div className="mx-auto flex h-full min-h-0 max-w-[1720px] gap-5">
       <div
         className={
           viewMode === "split"
-            ? "grid h-full min-h-0 grid-cols-2 gap-5"
-            : "mx-auto grid h-full min-h-0 w-full max-w-[900px] grid-cols-1"
+            ? "grid h-full min-h-0 min-w-0 flex-1 grid-cols-2 gap-5 transition-[width,flex-basis] duration-200 ease-out"
+            : "mx-auto grid h-full min-h-0 min-w-0 flex-1 grid-cols-1 transition-[width,flex-basis] duration-200 ease-out"
         }
       >
         {showOriginal ? (
@@ -700,16 +723,18 @@ function ReaderLayout({
             title="Original"
             pageIndex={pageIndex}
             side="original"
+            fontSize={originalFontSize}
+            onFontSizeChange={onOriginalFontSizeChange}
             onSelectionContextMenu={onSelectionContextMenu}
           >
             {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
               <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
             ) : originalBlocks.length ? (
-              <BlockFlow blocks={originalBlocks} fontSize={fontSize} direction="ltr" side="original" pageIndex={pageIndex} annotations={pageAnnotations} />
+              <BlockFlow blocks={originalBlocks} fontSize={originalFontSize} direction="ltr" side="original" pageIndex={pageIndex} annotations={pageAnnotations} />
             ) : page?.isBlank || !sourceText ? (
               <div className="h-full min-h-[420px]" />
             ) : (
-              <TextFlow text={sourceText} fontSize={fontSize} direction="ltr" side="original" pageIndex={pageIndex} annotations={pageAnnotations} />
+              <TextFlow text={sourceText} fontSize={originalFontSize} direction="ltr" side="original" pageIndex={pageIndex} annotations={pageAnnotations} />
             )}
           </Paper>
         ) : null}
@@ -720,12 +745,14 @@ function ReaderLayout({
             title="Translation"
             pageIndex={pageIndex}
             side="translation"
+            fontSize={translationFontSize}
+            onFontSizeChange={onTranslationFontSizeChange}
             onSelectionContextMenu={onSelectionContextMenu}
           >
             {page?.isBlank ? (
               <div className="h-full min-h-[420px]" />
             ) : translatedBlocks.length ? (
-              <DisplayFlow blocks={translatedBlocks} fontSize={fontSize} pageIndex={pageIndex} annotations={pageAnnotations} />
+              <DisplayFlow blocks={translatedBlocks} fontSize={translationFontSize} pageIndex={pageIndex} annotations={pageAnnotations} />
             ) : (
               <div className="flex h-full min-h-[420px] items-center justify-center text-center text-muted">No translation for this page yet.</div>
             )}
@@ -733,16 +760,23 @@ function ReaderLayout({
         ) : null}
       </div>
 
-      {notesOpen ? (
-        <NotesPanel
-          annotations={annotations}
-          currentPageIndex={pageIndex}
-          colorFilter={notesColorFilter}
-          onColorFilterChange={onNotesColorFilterChange}
-          onDelete={onDeleteAnnotation}
-          onGoTo={onGoToAnnotation}
-        />
-      ) : null}
+      <div
+        className={`min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
+          notesOpen ? "w-80" : "w-0"
+        }`}
+      >
+        {notesMounted ? (
+          <NotesPanel
+            open={notesOpen}
+            annotations={annotations}
+            currentPageIndex={pageIndex}
+            colorFilter={notesColorFilter}
+            onColorFilterChange={onNotesColorFilterChange}
+            onDelete={onDeleteAnnotation}
+            onGoTo={onGoToAnnotation}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -768,7 +802,7 @@ function PageNavigator({
 }) {
   return (
     <footer className="flex h-20 shrink-0 items-center justify-center border-t border-line bg-paper/90 px-8">
-      <div className="flex w-full max-w-5xl items-center justify-between rounded-2xl border border-line bg-white/80 p-2 shadow-sm">
+      <div className="flex w-full max-w-5xl items-center justify-between gap-4 rounded-2xl border border-line bg-white/80 p-2 shadow-sm">
         <button
           type="button"
           disabled={!canGoPrevious}
@@ -802,8 +836,28 @@ function PageNavigator({
           Next
           <ChevronRight size={20} />
         </button>
+        {hasBook ? <ReadingProgress currentPage={pageIndex + 1} pageCount={pageCount} /> : null}
       </div>
     </footer>
+  );
+}
+
+function ReadingProgress({ currentPage, pageCount }: { currentPage: number; pageCount: number }) {
+  const percent = pageCount ? Math.round((currentPage / pageCount) * 100) : 0;
+  const clampedPercent = Math.max(0, Math.min(100, percent));
+  return (
+    <div
+      className="pointer-events-none flex h-14 w-14 shrink-0 items-center justify-center rounded-full p-[3px] shadow-soft"
+      style={{
+        background: `conic-gradient(#171717 ${clampedPercent * 3.6}deg, #e6ded2 0deg)`
+      }}
+      aria-label={`Reading progress ${clampedPercent}%`}
+    >
+      <div className="flex h-full w-full flex-col items-center justify-center rounded-full border border-white/70 bg-paper/95 text-ink backdrop-blur">
+        <span className="text-xs font-bold leading-none">{clampedPercent}%</span>
+        <span className="mt-1 text-[9px] font-semibold leading-none text-muted">{currentPage}/{pageCount}</span>
+      </div>
+    </div>
   );
 }
 
@@ -811,20 +865,28 @@ function Paper({
   title,
   pageIndex,
   side,
+  fontSize,
+  onFontSizeChange,
   onSelectionContextMenu,
   children
 }: {
   title: string;
   pageIndex: number;
   side: AnnotationSide;
+  fontSize: number;
+  onFontSizeChange: (value: number | ((current: number) => number)) => void;
   onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
   children: ReactNode;
 }) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
-      <div className="flex shrink-0 items-center justify-between border-b border-line bg-paper px-6 py-4">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <span className="text-sm text-muted">Page {pageIndex + 1}</span>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-paper px-6 py-4">
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold">
+            {title} <span className="text-muted">| Page {pageIndex + 1}</span>
+          </h2>
+        </div>
+        <FontSizeControl value={fontSize} onChange={onFontSizeChange} label={`${title} text size`} />
       </div>
       <div
         data-reader-scroll-pane
@@ -834,6 +896,38 @@ function Paper({
         {children}
       </div>
     </section>
+  );
+}
+
+function FontSizeControl({
+  value,
+  onChange,
+  label
+}: {
+  value: number;
+  onChange: (value: number | ((current: number) => number)) => void;
+  label: string;
+}) {
+  return (
+    <div className="app-no-drag inline-flex shrink-0 items-center rounded-lg border border-line bg-white p-1" aria-label={label}>
+      <button
+        type="button"
+        onClick={() => onChange((current) => Math.max(14, current - 1))}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-cream hover:text-ink"
+        title="Smaller text"
+      >
+        <Minus size={15} />
+      </button>
+      <span className="w-8 text-center text-xs font-semibold text-muted">{value}</span>
+      <button
+        type="button"
+        onClick={() => onChange((current) => Math.min(36, current + 1))}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-cream hover:text-ink"
+        title="Larger text"
+      >
+        <Plus size={15} />
+      </button>
+    </div>
   );
 }
 
@@ -1143,15 +1237,20 @@ function SelectionToolbar({
 function SettingsDialog({
   open,
   settings,
+  hasBook,
   onClose,
-  onSave
+  onSave,
+  onExportData
 }: {
   open: boolean;
   settings: LiaraAiSettings;
+  hasBook: boolean;
   onClose: () => void;
   onSave: (settings: LiaraAiSettings) => void;
+  onExportData: () => void;
 }) {
   const [draft, setDraft] = useState<LiaraAiSettings>(settings);
+  const [activeTab, setActiveTab] = useState<SettingsTab>("ai");
 
   useEffect(() => {
     setDraft(settings);
@@ -1176,59 +1275,105 @@ function SettingsDialog({
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold">Liara Settings</h2>
-            <p className="mt-1 text-sm leading-6 text-muted">Saved locally on this device for the next AI steps.</p>
+            <h2 className="text-base font-semibold">Settings</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">Configure AI and local reader data.</p>
           </div>
           <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-cream">
             <X size={18} />
           </button>
         </div>
 
-        <label className="mb-4 block">
-          <span className="mb-2 block text-sm font-semibold text-ink">URL</span>
-          <input
-            value={draft.url}
-            onChange={(event) => setDraft((value) => ({ ...value, url: event.target.value }))}
-            placeholder="https://..."
-            className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-ink">API Key</span>
-          <input
-            value={draft.apiKey}
-            onChange={(event) => setDraft((value) => ({ ...value, apiKey: event.target.value }))}
-            type="password"
-            placeholder="Liara API key"
-            className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
-          />
-        </label>
-
-        <label className="mt-4 block">
-          <span className="mb-2 block text-sm font-semibold text-ink">Model</span>
-          <select
-            value={draft.model || AI_MODELS[0].value}
-            onChange={(event) => setDraft((value) => ({ ...value, model: event.target.value }))}
-            className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+        <div className="mb-5 grid grid-cols-2 rounded-xl bg-cream p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("ai")}
+            className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${activeTab === "ai" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"}`}
           >
-            {AI_MODELS.map((model) => (
-              <option key={model.value} value={model.value}>
-                {model.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-semibold text-muted hover:bg-cream">
-            Cancel
+            AI
           </button>
-          <button type="submit" className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-white hover:bg-black">
-            <Save size={16} />
-            Save
+          <button
+            type="button"
+            onClick={() => setActiveTab("data")}
+            className={`h-9 rounded-lg px-4 text-sm font-semibold transition ${activeTab === "data" ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"}`}
+          >
+            Data
           </button>
         </div>
+
+        {activeTab === "ai" ? (
+          <>
+            <label className="mb-4 block">
+              <span className="mb-2 block text-sm font-semibold text-ink">URL</span>
+              <input
+                value={draft.url}
+                onChange={(event) => setDraft((value) => ({ ...value, url: event.target.value }))}
+                placeholder="https://..."
+                className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-ink">API Key</span>
+              <input
+                value={draft.apiKey}
+                onChange={(event) => setDraft((value) => ({ ...value, apiKey: event.target.value }))}
+                type="password"
+                placeholder="Liara API key"
+                className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+              />
+            </label>
+
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-semibold text-ink">Model</span>
+              <select
+                value={draft.model || AI_MODELS[0].value}
+                onChange={(event) => setDraft((value) => ({ ...value, model: event.target.value }))}
+                className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+              >
+                {AI_MODELS.map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button type="button" onClick={onClose} className="h-10 rounded-xl px-4 text-sm font-semibold text-muted hover:bg-cream">
+                Cancel
+              </button>
+              <button type="submit" className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-white hover:bg-black">
+                <Save size={16} />
+                Save
+              </button>
+            </div>
+          </>
+        ) : (
+          <div>
+            <section className="rounded-xl border border-line bg-paper p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-ink">
+                  <Download size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-ink">Export reader data</h3>
+                  <p className="mt-1 text-sm leading-6 text-muted">
+                    Export this book's reading position, highlights, notes, and generated AI outputs as JSON.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onExportData}
+                disabled={!hasBook}
+                className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-white hover:bg-black disabled:opacity-40"
+              >
+                <Download size={16} />
+                Export data
+              </button>
+            </section>
+          </div>
+        )}
       </form>
     </div>
   );
@@ -1512,11 +1657,76 @@ function AiDialog({
 function SummaryArticle({ summary }: { summary: ReaderSummary }) {
   return (
     <article>
-      <div className="mb-2 text-xs font-semibold text-muted">
-        Page {summary.start_page} / {summary.end_page} · {summary.model}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-muted">
+        <span>Page {summary.start_page} / {summary.end_page}</span>
+        <span>·</span>
+        <span>{summary.model}</span>
+        <UsageCostBadges summary={summary} />
       </div>
       <p className="whitespace-pre-wrap text-right font-vazir text-sm leading-7 text-ink" dir="rtl">{summary.summary}</p>
     </article>
+  );
+}
+
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  onCancel,
+  onConfirm
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="app-no-drag fixed inset-0 z-[70] flex items-center justify-center bg-ink/35 px-5" onMouseDown={onCancel}>
+      <section
+        onMouseDown={(event) => event.stopPropagation()}
+        className="w-full max-w-sm rounded-2xl border border-line bg-white p-5 shadow-2xl"
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-ink">{title}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">{body}</p>
+          </div>
+          <button type="button" onClick={onCancel} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-cream">
+            <X size={17} />
+          </button>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="h-10 rounded-xl px-4 text-sm font-semibold text-muted hover:bg-cream">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} className="h-10 rounded-xl bg-red-700 px-4 text-sm font-semibold text-white hover:bg-red-800">
+            {confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function UsageCostBadges({ summary, compact = false, selected = false }: { summary: ReaderSummary; compact?: boolean; selected?: boolean }) {
+  const cost = costDisplayText(summary);
+  if (!cost) return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+      selected ? "bg-white/10 text-white/80" : compact ? "bg-ink/5 text-muted" : "bg-cream text-muted"
+    }`}>
+      cost not returned
+    </span>
+  );
+  const className = selected
+    ? "bg-white/10 text-white/80"
+    : compact
+      ? "bg-ink/5 text-muted"
+      : "bg-cream text-muted";
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${className}`}>
+      {cost}
+    </span>
   );
 }
 
@@ -1609,6 +1819,9 @@ function GeneratedSummaryGroup({
                 Page {summary.start_page} / {summary.end_page}
               </span>
               <SummaryListTitle title={summaryTitle(summary)} />
+              <div className="mt-2">
+                <UsageCostBadges summary={summary} compact selected={isSelected} />
+              </div>
             </button>
             <div className="mt-2 flex justify-end">
               <button
@@ -1676,7 +1889,18 @@ function outputType(summary: ReaderSummary) {
   return summary.output_type === "notes" ? "notes" : "summary";
 }
 
+function costDisplayText(summary: ReaderSummary) {
+  const cost = Number(summary.provider_cost);
+  if (!Number.isFinite(cost)) return null;
+  const currency = summary.cost_currency?.trim();
+  const formatted = currency?.toLowerCase() === "toman"
+    ? cost.toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : cost.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  return currency ? `${formatted} ${currency}` : `${formatted} provider cost`;
+}
+
 function NotesPanel({
+  open,
   annotations,
   currentPageIndex,
   colorFilter,
@@ -1684,6 +1908,7 @@ function NotesPanel({
   onDelete,
   onGoTo
 }: {
+  open: boolean;
   annotations: ReaderAnnotation[];
   currentPageIndex: number;
   colorFilter: string | null;
@@ -1694,7 +1919,12 @@ function NotesPanel({
   const filteredAnnotations = annotations.filter((annotation) => !colorFilter || normalizedHighlightColor(annotation.color) === colorFilter);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
+    <aside
+      data-open={open}
+      className={`notes-panel flex h-full min-h-0 w-80 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft transition-[transform,opacity] duration-300 ease-out ${
+        open ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"
+      }`}
+    >
       <div className="shrink-0 border-b border-line bg-paper px-5 py-4">
         <div className="flex items-center justify-between">
           <div>

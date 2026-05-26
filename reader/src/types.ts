@@ -123,6 +123,11 @@ export interface ReaderSummary {
   summary: string;
   output_type?: "summary" | "notes" | string;
   title?: string | null;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  provider_cost?: number | null;
+  cost_currency?: string | null;
   created_at?: string;
 }
 

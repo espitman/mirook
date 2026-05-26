@@ -170,12 +170,22 @@ async function getReaderDb() {
       summary TEXT NOT NULL,
       output_type TEXT NOT NULL DEFAULT 'summary',
       title TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_cost REAL,
+      cost_currency TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
     );
   `);
   ensureColumn(readerDb, "ai_summaries", "output_type", "TEXT NOT NULL DEFAULT 'summary'");
   ensureColumn(readerDb, "ai_summaries", "title", "TEXT");
+  ensureColumn(readerDb, "ai_summaries", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(readerDb, "ai_summaries", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(readerDb, "ai_summaries", "total_tokens", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(readerDb, "ai_summaries", "provider_cost", "REAL");
+  ensureColumn(readerDb, "ai_summaries", "cost_currency", "TEXT");
   saveReaderDb();
   return readerDb;
 }
@@ -371,7 +381,7 @@ async function summarizePages(request) {
   if (!inputText) throw new Error("No text was found in this page range.");
 
   const model = settings.model || "openai/gpt-5-nano";
-  const summary = await requestAiCompletion(settings, [
+  const result = await requestAiCompletion(settings, [
     {
       role: "system",
       content: "You summarize book passages for a Persian reader. Write concise, useful Persian summaries. Preserve important names, terms, and concrete ideas."
@@ -387,7 +397,8 @@ async function summarizePages(request) {
     startPage: Number(request.startPage || 1),
     endPage: Number(request.endPage || request.startPage || 1),
     model,
-    summary,
+    summary: result.text,
+    usage: result.usage,
     outputType: "summary",
     title: `Summary ${request.startPage}-${request.endPage}`
   });
@@ -403,7 +414,7 @@ async function generateTextFromNotes(request) {
   if (!inputText) throw new Error("No notes or highlights matched this filter.");
 
   const model = settings.model || "openai/gpt-5-nano";
-  const summary = await requestAiCompletion(settings, [
+  const result = await requestAiCompletion(settings, [
     {
       role: "system",
       content: "You turn a reader's notes and highlights into a coherent Persian text. Use the notes as the main signal, preserve key quoted ideas, and avoid inventing facts."
@@ -419,7 +430,8 @@ async function generateTextFromNotes(request) {
     startPage: Number(request.startPage || 1),
     endPage: Number(request.endPage || request.startPage || 1),
     model,
-    summary,
+    summary: result.text,
+    usage: result.usage,
     outputType: "notes",
     title: `Notes ${request.startPage}-${request.endPage}`
   });
@@ -450,19 +462,28 @@ async function requestAiCompletion(settings, messages) {
     throw new Error(message);
   }
 
-  const summary = payload?.choices?.[0]?.message?.content?.trim();
-  if (!summary) throw new Error("The AI response did not include a summary.");
-  return summary;
+  const text = payload?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("The AI response did not include a summary.");
+  return {
+    text,
+    usage: aiUsageFromPayload(payload)
+  };
 }
 
-async function saveAiOutput({ bookId, startPage, endPage, model, summary, outputType, title }) {
+async function saveAiOutput({ bookId, startPage, endPage, model, summary, usage, outputType, title }) {
   const db = await getReaderDb();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   run(
     db,
-    `INSERT INTO ai_summaries (id, book_id, start_page, end_page, model, summary, output_type, title, created_at)
-     VALUES ($id, $bookId, $startPage, $endPage, $model, $summary, $outputType, $title, $createdAt)`,
+    `INSERT INTO ai_summaries (
+       id, book_id, start_page, end_page, model, summary, output_type, title,
+       input_tokens, output_tokens, total_tokens, provider_cost, cost_currency, created_at
+     )
+     VALUES (
+       $id, $bookId, $startPage, $endPage, $model, $summary, $outputType, $title,
+       $inputTokens, $outputTokens, $totalTokens, $providerCost, $costCurrency, $createdAt
+     )`,
     {
       $id: id,
       $bookId: bookId,
@@ -472,11 +493,85 @@ async function saveAiOutput({ bookId, startPage, endPage, model, summary, output
       $summary: summary,
       $outputType: outputType,
       $title: title,
+      $inputTokens: Number(usage?.inputTokens || 0),
+      $outputTokens: Number(usage?.outputTokens || 0),
+      $totalTokens: Number(usage?.totalTokens || 0),
+      $providerCost: usage?.providerCost == null ? null : Number(usage.providerCost),
+      $costCurrency: usage?.costCurrency || null,
       $createdAt: now
     }
   );
   saveReaderDb();
   return allRows(db, "SELECT * FROM ai_summaries WHERE id = $id LIMIT 1", { $id: id })[0];
+}
+
+function aiUsageFromPayload(payload) {
+  const usage = payload?.usage || {};
+  const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
+  const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
+  const totalTokens = Number(usage.total_tokens ?? (inputTokens + outputTokens));
+  const cost = providerReportedCost(payload);
+  return {
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
+    providerCost: cost?.amount ?? null,
+    costCurrency: cost?.currency ?? null
+  };
+}
+
+function providerReportedCost(payload) {
+  const preferredKeys = [
+    "total_cost_toman",
+    "total_cost_usd",
+    "total_cost",
+    "cost_toman",
+    "cost_usd",
+    "cost"
+  ];
+  for (const key of preferredKeys) {
+    const cost = findProviderReportedCost(payload, key);
+    if (cost) return cost;
+  }
+  return findProviderReportedCost(payload);
+}
+
+function findProviderReportedCost(value, expectedKey) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const cost = findProviderReportedCost(item, expectedKey);
+      if (cost) return cost;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    const isMatch = expectedKey ? normalizedKey === expectedKey : normalizedKey.includes("cost") || normalizedKey.includes("price");
+    if (isMatch) {
+      const amount = numericValue(nestedValue);
+      if (amount != null) return { amount, currency: currencyName(normalizedKey) };
+    }
+    const cost = findProviderReportedCost(nestedValue, expectedKey);
+    if (cost) return cost;
+  }
+  return null;
+}
+
+function numericValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const number = Number(value.trim());
+    return Number.isFinite(number) ? number : null;
+  }
+  return null;
+}
+
+function currencyName(key) {
+  if (key.includes("usd")) return "USD";
+  if (key.includes("toman")) return "toman";
+  if (key.includes("irr") || key.includes("rial")) return "IRR";
+  return null;
 }
 
 function chatCompletionsUrl(url) {
