@@ -178,6 +178,30 @@ async function getReaderDb() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS ai_chat_threads (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS ai_chat_messages (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      start_page INTEGER,
+      end_page INTEGER,
+      model TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_cost REAL,
+      cost_currency TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(thread_id) REFERENCES ai_chat_threads(id) ON DELETE CASCADE
+    );
   `);
   ensureColumn(readerDb, "ai_summaries", "output_type", "TEXT NOT NULL DEFAULT 'summary'");
   ensureColumn(readerDb, "ai_summaries", "title", "TEXT");
@@ -238,7 +262,35 @@ async function readerStateForBook(bookId) {
   const annotations = allRows(db, "SELECT * FROM annotations WHERE book_id = $bookId ORDER BY page_index ASC, created_at ASC", { $bookId: bookId });
   const bookmarks = allRows(db, "SELECT * FROM bookmarks WHERE book_id = $bookId ORDER BY page_index ASC, created_at ASC", { $bookId: bookId });
   const summaries = allRows(db, "SELECT * FROM ai_summaries WHERE book_id = $bookId ORDER BY created_at DESC", { $bookId: bookId });
-  return { position, annotations, bookmarks, summaries };
+  const chatThreads = chatThreadsForBook(db, bookId);
+  return { position, annotations, bookmarks, summaries, chatThreads };
+}
+
+function chatThreadsForBook(db, bookId) {
+  const threads = allRows(db, "SELECT * FROM ai_chat_threads WHERE book_id = $bookId ORDER BY updated_at DESC", { $bookId: bookId });
+  const messages = allRows(
+    db,
+    `SELECT m.*
+       FROM ai_chat_messages m
+       JOIN ai_chat_threads t ON t.id = m.thread_id
+      WHERE t.book_id = $bookId
+      ORDER BY m.created_at ASC`,
+    { $bookId: bookId }
+  );
+  const messagesByThread = new Map();
+  for (const message of messages) {
+    const list = messagesByThread.get(message.thread_id) || [];
+    list.push(message);
+    messagesByThread.set(message.thread_id, list);
+  }
+  return threads.map((thread) => ({ ...thread, messages: messagesByThread.get(thread.id) || [] }));
+}
+
+function chatThreadById(db, threadId) {
+  const thread = allRows(db, "SELECT * FROM ai_chat_threads WHERE id = $id LIMIT 1", { $id: threadId })[0] ?? null;
+  if (!thread) return null;
+  const messages = allRows(db, "SELECT * FROM ai_chat_messages WHERE thread_id = $threadId ORDER BY created_at ASC", { $threadId: threadId });
+  return { ...thread, messages };
 }
 
 function annotationById(db, id) {
@@ -299,6 +351,15 @@ async function deleteAiOutput(id) {
   return true;
 }
 
+async function deleteChatThread(id) {
+  if (!id) return false;
+  const db = await getReaderDb();
+  run(db, "DELETE FROM ai_chat_messages WHERE thread_id = $id", { $id: id });
+  run(db, "DELETE FROM ai_chat_threads WHERE id = $id", { $id: id });
+  saveReaderDb();
+  return true;
+}
+
 async function exportBookData(bookId) {
   const db = await getReaderDb();
   const book = allRows(db, "SELECT * FROM books WHERE id = $bookId LIMIT 1", { $bookId: bookId })[0];
@@ -335,16 +396,18 @@ async function exportBookData(bookId) {
 async function getAiSettings() {
   const db = await getReaderDb();
   const raw = oneValue(db, "SELECT value FROM app_settings WHERE key = 'liara_ai' LIMIT 1");
-  if (!raw) return { url: "", apiKey: "", model: "openai/gpt-5-nano" };
+  if (!raw) return { url: "", apiKey: "", model: "openai/gpt-5-nano", askModel: "openai/gpt-5-nano" };
   try {
     const parsed = JSON.parse(String(raw));
+    const model = typeof parsed.model === "string" && parsed.model ? parsed.model : "openai/gpt-5-nano";
     return {
       url: typeof parsed.url === "string" ? parsed.url : "",
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
-      model: typeof parsed.model === "string" && parsed.model ? parsed.model : "openai/gpt-5-nano"
+      model,
+      askModel: typeof parsed.askModel === "string" && parsed.askModel ? parsed.askModel : model
     };
   } catch {
-    return { url: "", apiKey: "", model: "openai/gpt-5-nano" };
+    return { url: "", apiKey: "", model: "openai/gpt-5-nano", askModel: "openai/gpt-5-nano" };
   }
 }
 
@@ -353,7 +416,8 @@ async function saveAiSettings(settings) {
   const normalized = {
     url: String(settings?.url || "").trim(),
     apiKey: String(settings?.apiKey || "").trim(),
-    model: String(settings?.model || "openai/gpt-5-nano").trim()
+    model: String(settings?.model || "openai/gpt-5-nano").trim(),
+    askModel: String(settings?.askModel || settings?.model || "openai/gpt-5-nano").trim()
   };
   run(
     db,
@@ -413,8 +477,8 @@ async function generateTextFromNotes(request) {
   const inputText = String(request.text || "").trim();
   if (!inputText) throw new Error("No notes or highlights matched this filter.");
 
-  const model = settings.model || "openai/gpt-5-nano";
-  const result = await requestAiCompletion(settings, [
+  const model = settings.askModel || settings.model || "openai/gpt-5-nano";
+  const result = await requestAiCompletion({ ...settings, model }, [
     {
       role: "system",
       content: "You turn a reader's notes and highlights into a coherent Persian text. Use the notes as the main signal, preserve key quoted ideas, and avoid inventing facts."
@@ -435,6 +499,114 @@ async function generateTextFromNotes(request) {
     outputType: "notes",
     title: `Notes ${request.startPage}-${request.endPage}`
   });
+}
+
+async function askBookQuestion(request) {
+  if (!request?.bookId) throw new Error("No book is open.");
+  const settings = await getAiSettings();
+  if (!settings.url) throw new Error("Add a Liara URL in Settings first.");
+  if (!settings.apiKey) throw new Error("Add a Liara API key in Settings first.");
+
+  const question = String(request.question || "").trim();
+  if (!question) throw new Error("Write a question first.");
+  const inputText = String(request.text || "").trim();
+  if (!inputText) throw new Error("No book text was found for this question.");
+
+  const db = await getReaderDb();
+  const now = new Date().toISOString();
+  const model = settings.model || "openai/gpt-5-nano";
+  let threadId = request.threadId ? String(request.threadId) : "";
+  let thread = threadId ? chatThreadById(db, threadId) : null;
+  if (thread && thread.book_id !== request.bookId) throw new Error("This chat thread belongs to another book.");
+  if (!thread) {
+    threadId = crypto.randomUUID();
+  }
+
+  const history = (thread?.messages || []).slice(-12).map((message) => ({
+    role: message.role === "assistant" ? "assistant" : "user",
+    content: String(message.content || "")
+  }));
+  const result = await requestAiCompletion(settings, [
+    {
+      role: "system",
+      content: [
+        "You are a book-grounded assistant for a Persian reader.",
+        "Answer ONLY from the provided book context. Do not use outside knowledge, assumptions, or general memory.",
+        "If the answer is not explicitly supported by the provided book context, say in Persian: «در متن کتاب پیدا نشد.»",
+        "When possible, mention the page numbers from the context. Keep the answer Persian unless the user asks otherwise."
+      ].join(" ")
+    },
+    {
+      role: "user",
+      content: `متن مجاز کتاب برای پاسخ دادن فقط همین است. از بیرون این متن هیچ چیزی اضافه نکن.\n\n${inputText}`
+    },
+    ...history,
+    {
+      role: "user",
+      content: question
+    }
+  ]);
+
+  const startPage = Number(request.startPage || 1);
+  const endPage = Number(request.endPage || request.startPage || 1);
+  if (!thread) {
+    run(
+      db,
+      `INSERT INTO ai_chat_threads (id, book_id, title, created_at, updated_at)
+       VALUES ($id, $bookId, $title, $createdAt, $updatedAt)`,
+      {
+        $id: threadId,
+        $bookId: request.bookId,
+        $title: compactTitle(question),
+        $createdAt: now,
+        $updatedAt: now
+      }
+    );
+  }
+  run(
+    db,
+    `INSERT INTO ai_chat_messages (
+       id, thread_id, role, content, start_page, end_page, model, created_at
+     )
+     VALUES ($id, $threadId, 'user', $content, $startPage, $endPage, $model, $createdAt)`,
+    {
+      $id: crypto.randomUUID(),
+      $threadId: threadId,
+      $content: question,
+      $startPage: startPage,
+      $endPage: endPage,
+      $model: model,
+      $createdAt: now
+    }
+  );
+  run(
+    db,
+    `INSERT INTO ai_chat_messages (
+       id, thread_id, role, content, start_page, end_page, model,
+       input_tokens, output_tokens, total_tokens, provider_cost, cost_currency, created_at
+     )
+     VALUES (
+       $id, $threadId, 'assistant', $content, $startPage, $endPage, $model,
+       $inputTokens, $outputTokens, $totalTokens, $providerCost, $costCurrency, $createdAt
+     )`,
+    {
+      $id: crypto.randomUUID(),
+      $threadId: threadId,
+      $content: result.text,
+      $startPage: startPage,
+      $endPage: endPage,
+      $model: model,
+      $inputTokens: Number(result.usage?.inputTokens || 0),
+      $outputTokens: Number(result.usage?.outputTokens || 0),
+      $totalTokens: Number(result.usage?.totalTokens || 0),
+      $providerCost: result.usage?.providerCost == null ? null : Number(result.usage.providerCost),
+      $costCurrency: result.usage?.costCurrency || null,
+      $createdAt: new Date().toISOString()
+    }
+  );
+  run(db, "UPDATE ai_chat_threads SET updated_at = $updatedAt WHERE id = $id", { $updatedAt: new Date().toISOString(), $id: threadId });
+  saveReaderDb();
+  return chatThreadById(db, threadId);
 }
 
 async function requestAiCompletion(settings, messages) {
@@ -463,7 +635,7 @@ async function requestAiCompletion(settings, messages) {
   }
 
   const text = payload?.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error("The AI response did not include a summary.");
+  if (!text) throw new Error("The AI response did not include text.");
   return {
     text,
     usage: aiUsageFromPayload(payload)
@@ -518,6 +690,11 @@ function aiUsageFromPayload(payload) {
     providerCost: cost?.amount ?? null,
     costCurrency: cost?.currency ?? null
   };
+}
+
+function compactTitle(text) {
+  const title = String(text || "").replace(/\s+/g, " ").trim();
+  return title.length > 72 ? `${title.slice(0, 69)}...` : title || "Book question";
 }
 
 function providerReportedCost(payload) {
@@ -867,7 +1044,9 @@ ipcMain.handle("reader:saveAnnotation", async (_event, annotation) => saveAnnota
 ipcMain.handle("reader:deleteAnnotation", async (_event, id) => deleteAnnotation(id));
 ipcMain.handle("reader:summarizePages", async (_event, request) => summarizePages(request));
 ipcMain.handle("reader:generateTextFromNotes", async (_event, request) => generateTextFromNotes(request));
+ipcMain.handle("reader:askBookQuestion", async (_event, request) => askBookQuestion(request));
 ipcMain.handle("reader:deleteAiOutput", async (_event, id) => deleteAiOutput(id));
+ipcMain.handle("reader:deleteChatThread", async (_event, id) => deleteChatThread(id));
 ipcMain.handle("settings:getAi", async () => getAiSettings());
 ipcMain.handle("settings:saveAi", async (_event, settings) => saveAiSettings(settings));
 

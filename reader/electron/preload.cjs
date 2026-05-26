@@ -11,7 +11,9 @@ contextBridge.exposeInMainWorld("mirook", {
   deleteAnnotation: (id) => ipcRenderer.invoke("reader:deleteAnnotation", id),
   summarizePages: (request) => ipcRenderer.invoke("reader:summarizePages", request),
   generateTextFromNotes: (request) => ipcRenderer.invoke("reader:generateTextFromNotes", request),
+  askBookQuestion: (request) => ipcRenderer.invoke("reader:askBookQuestion", request),
   deleteAiOutput: (id) => ipcRenderer.invoke("reader:deleteAiOutput", id),
+  deleteChatThread: (id) => ipcRenderer.invoke("reader:deleteChatThread", id),
   getAiSettings: () => ipcRenderer.invoke("settings:getAi"),
   saveAiSettings: (settings) => ipcRenderer.invoke("settings:saveAi", settings)
 });

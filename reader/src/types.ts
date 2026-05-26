@@ -67,6 +67,7 @@ export interface ReaderState {
   annotations?: ReaderAnnotation[];
   bookmarks?: unknown[];
   summaries?: ReaderSummary[];
+  chatThreads?: ReaderChatThread[];
 }
 
 export interface SaveReadingPositionInput {
@@ -112,6 +113,7 @@ export interface LiaraAiSettings {
   url: string;
   apiKey: string;
   model: string;
+  askModel?: string;
 }
 
 export interface ReaderSummary {
@@ -131,6 +133,31 @@ export interface ReaderSummary {
   created_at?: string;
 }
 
+export interface ReaderChatMessage {
+  id: string;
+  thread_id: string;
+  role: "user" | "assistant";
+  content: string;
+  start_page?: number | null;
+  end_page?: number | null;
+  model?: string | null;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  provider_cost?: number | null;
+  cost_currency?: string | null;
+  created_at?: string;
+}
+
+export interface ReaderChatThread {
+  id: string;
+  book_id: string;
+  title: string;
+  created_at?: string;
+  updated_at?: string;
+  messages: ReaderChatMessage[];
+}
+
 export interface SummarizePagesInput {
   bookId: string;
   startPage: number;
@@ -145,6 +172,15 @@ export interface GenerateTextFromNotesInput {
   text: string;
 }
 
+export interface AskBookQuestionInput {
+  bookId: string;
+  threadId?: string | null;
+  startPage: number;
+  endPage: number;
+  question: string;
+  text: string;
+}
+
 export interface MirookBridge {
   openBook: () => Promise<MirookBookPayload | null>;
   openBookPath: (filePath: string) => Promise<MirookBookPayload>;
@@ -156,7 +192,9 @@ export interface MirookBridge {
   deleteAnnotation: (id: string) => Promise<boolean>;
   summarizePages: (request: SummarizePagesInput) => Promise<ReaderSummary>;
   generateTextFromNotes: (request: GenerateTextFromNotesInput) => Promise<ReaderSummary>;
+  askBookQuestion: (request: AskBookQuestionInput) => Promise<ReaderChatThread>;
   deleteAiOutput: (id: string) => Promise<boolean>;
+  deleteChatThread: (id: string) => Promise<boolean>;
   getAiSettings: () => Promise<LiaraAiSettings>;
   saveAiSettings: (settings: LiaraAiSettings) => Promise<LiaraAiSettings>;
 }

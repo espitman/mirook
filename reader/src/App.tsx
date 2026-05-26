@@ -4,6 +4,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   FileText,
   FolderOpen,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 import type { DisplayBlock } from "./readerBlocks";
 import { pageAlignedSourceBlocks, sourceDisplayBlocks, sourcePlainText, translatedDisplayBlocks, translationParagraphs } from "./readerBlocks";
-import type { AnnotationSide, EpubBlock, LiaraAiSettings, MirookBookPayload, ReaderAnnotation, ReaderSummary, TranslatedTextPage } from "./types";
+import type { AnnotationSide, EpubBlock, LiaraAiSettings, MirookBookPayload, ReaderAnnotation, ReaderChatThread, ReaderSummary, TranslatedTextPage } from "./types";
 
 type ViewMode = "split" | "original" | "translation";
 type SelectionState = {
@@ -37,7 +38,7 @@ type SelectionState = {
 };
 type NotePopoverPosition = { left: number; top: number; width: number; arrowLeft: number; placement: "above" | "below" };
 type NotePopoverAnchor = { x: number; y: number };
-type AiDialogMode = "create" | "generated";
+type AiDialogMode = "create" | "generated" | "ask";
 type AiTab = "new" | "notes";
 type SettingsTab = "ai" | "data";
 
@@ -50,7 +51,8 @@ const HIGHLIGHT_COLORS = [
 ];
 
 const AI_MODELS = [
-  { label: "openai/gpt-5-nano", value: "openai/gpt-5-nano" }
+  { label: "openai/gpt-5-nano", value: "openai/gpt-5-nano" },
+  { label: "google/gemini-2.0-flash-lite-001", value: "google/gemini-2.0-flash-lite-001" }
 ];
 
 const ORIGINAL_FONT_SIZE_STORAGE_KEY = "mirook-reader-original-font-size-v3";
@@ -79,16 +81,21 @@ export function App() {
   const [notesMounted, setNotesMounted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
-  const [aiSettings, setAiSettings] = useState<LiaraAiSettings>({ url: "", apiKey: "", model: AI_MODELS[0].value });
+  const [aiSettings, setAiSettings] = useState<LiaraAiSettings>({ url: "", apiKey: "", model: AI_MODELS[0].value, askModel: AI_MODELS[0].value });
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMounted, setAiMounted] = useState(false);
   const [aiDialogMode, setAiDialogMode] = useState<AiDialogMode>("create");
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const [aiDialogError, setAiDialogError] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isGeneratingNotesText, setIsGeneratingNotesText] = useState(false);
+  const [isAskingBook, setIsAskingBook] = useState(false);
   const [summaries, setSummaries] = useState<ReaderSummary[]>([]);
   const [latestSummary, setLatestSummary] = useState<ReaderSummary | null>(null);
+  const [chatThreads, setChatThreads] = useState<ReaderChatThread[]>([]);
+  const [activeChatThreadId, setActiveChatThreadId] = useState<string | null>(null);
   const [pendingDeleteAiOutputId, setPendingDeleteAiOutputId] = useState<string | null>(null);
+  const [pendingDeleteChatThreadId, setPendingDeleteChatThreadId] = useState<string | null>(null);
   const [isOpening, setIsOpening] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -138,6 +145,18 @@ export function App() {
     const timeout = window.setTimeout(() => setNotesMounted(false), 300);
     return () => window.clearTimeout(timeout);
   }, [notesOpen]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timeout = window.setTimeout(() => setError(null), 5200);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -298,6 +317,9 @@ export function App() {
     setBook(payload);
     setAnnotations(payload.readerState?.annotations ?? []);
     setSummaries(payload.readerState?.summaries ?? []);
+    const savedChatThreads = payload.readerState?.chatThreads ?? [];
+    setChatThreads(savedChatThreads);
+    setActiveChatThreadId(savedChatThreads[0]?.id ?? null);
     setLatestSummary(null);
     setPageIndex(restoredPageIndex);
     setViewMode(isViewMode(savedViewMode) ? savedViewMode : "split");
@@ -387,6 +409,7 @@ export function App() {
 
   function openAiDialog(mode: AiDialogMode) {
     setAiDialogMode(mode);
+    setAiDialogError(null);
     setAiMounted(true);
     setAiOpen(false);
     window.requestAnimationFrame(() => {
@@ -446,6 +469,66 @@ export function App() {
     }
   }
 
+  async function askBookQuestion(threadId: string | null, startPage: number, endPage: number, question: string) {
+    if (!book) return;
+    setError(null);
+    setAiDialogError(null);
+    setNotice(null);
+    setIsAskingBook(true);
+    const now = new Date().toISOString();
+    const start = Math.min(startPage, endPage);
+    const end = Math.max(startPage, endPage);
+    const pendingThreadId = threadId ?? `pending-${crypto.randomUUID()}`;
+    const pendingMessageId = `pending-message-${crypto.randomUUID()}`;
+    const pendingMessage = {
+      id: pendingMessageId,
+      thread_id: pendingThreadId,
+      role: "user" as const,
+      content: question,
+      start_page: start,
+      end_page: end,
+      model: aiSettings.askModel || aiSettings.model,
+      created_at: now
+    };
+    setActiveChatThreadId(pendingThreadId);
+    setChatThreads((items) => {
+      const existingThread = items.find((item) => item.id === threadId);
+      if (existingThread) {
+        return items.map((item) => (
+          item.id === existingThread.id
+            ? { ...item, messages: [...item.messages, pendingMessage], updated_at: now }
+            : item
+        ));
+      }
+      const pendingThread: ReaderChatThread = {
+        id: pendingThreadId,
+        book_id: book.id,
+        title: compactChatTitle(question),
+        created_at: now,
+        updated_at: now,
+        messages: [pendingMessage]
+      };
+      return [pendingThread, ...items];
+    });
+    try {
+      const text = summaryTextForRange(book, start, end);
+      const thread = await window.mirook.askBookQuestion({
+        bookId: book.id,
+        threadId,
+        startPage: start,
+        endPage: end,
+        question,
+        text
+      });
+      setActiveChatThreadId(thread.id);
+      setChatThreads((items) => [thread, ...items.filter((item) => item.id !== thread.id && item.id !== pendingThreadId)]);
+    } catch (err) {
+      setAiDialogError(errorMessage(err));
+    } finally {
+      setIsAskingBook(false);
+    }
+  }
+
   async function deleteAiOutput(id: string) {
     setError(null);
     try {
@@ -453,6 +536,33 @@ export function App() {
       setSummaries((items) => items.filter((item) => item.id !== id));
       setLatestSummary((item) => (item?.id === id ? null : item));
       setPendingDeleteAiOutputId(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function deleteChatThread(id: string) {
+    setError(null);
+    try {
+      await window.mirook.deleteChatThread(id);
+      setChatThreads((items) => {
+        const nextItems = items.filter((item) => item.id !== id);
+        setActiveChatThreadId((activeId) => (
+          activeId === id ? nextItems[0]?.id ?? null : activeId
+        ));
+        return nextItems;
+      });
+      setPendingDeleteChatThreadId(null);
+      setNotice("Thread deleted.");
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function copyTextToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("Copied to clipboard.");
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -539,6 +649,17 @@ export function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    openAiDialog("ask");
+                    setAiMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-cream"
+                >
+                  <MessageSquare size={16} />
+                  Ask book
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     openAiDialog("generated");
                     setAiMenuOpen(false);
                   }}
@@ -562,12 +683,12 @@ export function App() {
         </div>
       </header>
 
-      {error ? (
-        <div className="mx-8 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      ) : null}
-      {notice ? (
-        <div className="mx-8 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>
-      ) : null}
+      <ToastStack
+        error={error}
+        notice={notice}
+        onDismissError={() => setError(null)}
+        onDismissNotice={() => setNotice(null)}
+      />
 
       <main ref={scrollRef} className="min-h-0 flex-1 overflow-hidden px-8 py-7">
         {!book ? (
@@ -636,10 +757,19 @@ export function App() {
           latestSummary={latestSummary}
           summaries={summaries}
           annotations={annotations}
+          chatThreads={chatThreads}
+          activeChatThreadId={activeChatThreadId}
+          aiDialogError={aiDialogError}
           isGeneratingNotesText={isGeneratingNotesText}
+          isAskingBook={isAskingBook}
           onClose={closeAiDialog}
           onSummarize={summarizePageRange}
           onGenerateFromNotes={generateTextFromNotes}
+          onAskBookQuestion={askBookQuestion}
+          onSelectChatThread={setActiveChatThreadId}
+          onNewChatThread={() => setActiveChatThreadId(null)}
+          onDeleteChatThread={setPendingDeleteChatThreadId}
+          onCopyMessage={copyTextToClipboard}
           onDeleteAiOutput={setPendingDeleteAiOutputId}
         />
       ) : null}
@@ -651,6 +781,16 @@ export function App() {
           confirmLabel="Delete"
           onCancel={() => setPendingDeleteAiOutputId(null)}
           onConfirm={() => deleteAiOutput(pendingDeleteAiOutputId)}
+        />
+      ) : null}
+
+      {pendingDeleteChatThreadId ? (
+        <ConfirmDialog
+          title="Delete thread?"
+          body="This chat thread and all of its messages will be removed from this book."
+          confirmLabel="Delete"
+          onCancel={() => setPendingDeleteChatThreadId(null)}
+          onConfirm={() => deleteChatThread(pendingDeleteChatThreadId)}
         />
       ) : null}
 
@@ -1301,6 +1441,66 @@ function notePopoverPosition(anchor: NotePopoverAnchor): NotePopoverPosition {
   return { left, top, width, arrowLeft, placement };
 }
 
+function ToastStack({
+  error,
+  notice,
+  onDismissError,
+  onDismissNotice
+}: {
+  error: string | null;
+  notice: string | null;
+  onDismissError: () => void;
+  onDismissNotice: () => void;
+}) {
+  if (!error && !notice) return null;
+  return (
+    <div className="app-no-drag pointer-events-none fixed right-6 top-20 z-[70] flex w-[min(420px,calc(100vw-48px))] flex-col gap-3">
+      {notice ? <ToastMessage tone="success" message={notice} onDismiss={onDismissNotice} /> : null}
+      {error ? <ToastMessage tone="error" message={error} onDismiss={onDismissError} /> : null}
+    </div>
+  );
+}
+
+function ToastMessage({
+  tone,
+  message,
+  onDismiss
+}: {
+  tone: "success" | "error";
+  message: string;
+  onDismiss: () => void;
+}) {
+  const isError = tone === "error";
+  return (
+    <div
+      className={`pointer-events-auto flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-medium leading-6 shadow-2xl ${
+        isError ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"
+      }`}
+    >
+      <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${isError ? "bg-red-500" : "bg-emerald-500"}`} />
+      <span className="min-w-0 flex-1">{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className={`-mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+          isError ? "hover:bg-red-100" : "hover:bg-emerald-100"
+        }`}
+      >
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
+
+function normalizedAiSettingsDraft(settings: LiaraAiSettings): LiaraAiSettings {
+  const model = settings.model || AI_MODELS[0].value;
+  return {
+    ...settings,
+    model,
+    askModel: settings.askModel || model
+  };
+}
+
 function SelectionToolbar({
   selection,
   noteDraft,
@@ -1393,11 +1593,11 @@ function SettingsDialog({
   onSave: (settings: LiaraAiSettings) => void;
   onExportData: () => void;
 }) {
-  const [draft, setDraft] = useState<LiaraAiSettings>(settings);
+  const [draft, setDraft] = useState<LiaraAiSettings>(() => normalizedAiSettingsDraft(settings));
   const [activeTab, setActiveTab] = useState<SettingsTab>("ai");
 
   useEffect(() => {
-    setDraft(settings);
+    setDraft(normalizedAiSettingsDraft(settings));
   }, [settings]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1468,10 +1668,25 @@ function SettingsDialog({
             </label>
 
             <label className="mt-4 block">
-              <span className="mb-2 block text-sm font-semibold text-ink">Model</span>
+              <span className="mb-2 block text-sm font-semibold text-ink">Generation model</span>
               <select
                 value={draft.model || AI_MODELS[0].value}
                 onChange={(event) => setDraft((value) => ({ ...value, model: event.target.value }))}
+                className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
+              >
+                {AI_MODELS.map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-semibold text-ink">Ask model</span>
+              <select
+                value={draft.askModel || draft.model || AI_MODELS[0].value}
+                onChange={(event) => setDraft((value) => ({ ...value, askModel: event.target.value }))}
                 className="h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-amber-400"
               >
                 {AI_MODELS.map((model) => (
@@ -1532,10 +1747,19 @@ function AiDialog({
   latestSummary,
   summaries,
   annotations,
+  chatThreads,
+  activeChatThreadId,
+  aiDialogError,
   isGeneratingNotesText,
+  isAskingBook,
   onClose,
   onSummarize,
   onGenerateFromNotes,
+  onAskBookQuestion,
+  onSelectChatThread,
+  onNewChatThread,
+  onDeleteChatThread,
+  onCopyMessage,
   onDeleteAiOutput
 }: {
   mode: AiDialogMode;
@@ -1546,10 +1770,19 @@ function AiDialog({
   latestSummary: ReaderSummary | null;
   summaries: ReaderSummary[];
   annotations: ReaderAnnotation[];
+  chatThreads: ReaderChatThread[];
+  activeChatThreadId: string | null;
+  aiDialogError: string | null;
   isGeneratingNotesText: boolean;
+  isAskingBook: boolean;
   onClose: () => void;
   onSummarize: (startPage: number, endPage: number) => void;
   onGenerateFromNotes: (startPage: number, endPage: number, color: string | null, notesOnly: boolean) => void;
+  onAskBookQuestion: (threadId: string | null, startPage: number, endPage: number, question: string) => void;
+  onSelectChatThread: (id: string | null) => void;
+  onNewChatThread: () => void;
+  onDeleteChatThread: (id: string) => void;
+  onCopyMessage: (text: string) => void;
   onDeleteAiOutput: (id: string) => void;
 }) {
   const [startPage, setStartPage] = useState(pageIndex + 1);
@@ -1558,9 +1791,13 @@ function AiDialog({
   const [notesEndPage, setNotesEndPage] = useState(Math.min(pageCount || 1, pageIndex + 1));
   const [notesColorFilter, setNotesColorFilter] = useState<string | null>(null);
   const [notesOnly, setNotesOnly] = useState(false);
+  const [questionStartPage, setQuestionStartPage] = useState(1);
+  const [questionEndPage, setQuestionEndPage] = useState(Math.max(pageCount || 1, 1));
+  const [question, setQuestion] = useState("");
   const [activeTab, setActiveTab] = useState<AiTab>("new");
   const [selectedSummaryId, setSelectedSummaryId] = useState<string | null>(null);
   const selectedSummary = summaries.find((summary) => summary.id === selectedSummaryId) ?? summaries[0] ?? null;
+  const selectedChatThread = chatThreads.find((thread) => thread.id === activeChatThreadId) ?? null;
   const pageSummaries = summaries.filter((summary) => outputType(summary) === "summary");
   const noteOutputs = summaries.filter((summary) => outputType(summary) === "notes");
   const matchingNotesCount = notesForRange(annotations, notesStartPage, notesEndPage, notesColorFilter, notesOnly).length;
@@ -1570,6 +1807,7 @@ function AiDialog({
     setEndPage(Math.min(pageCount || 1, pageIndex + 1));
     setNotesStartPage(pageIndex + 1);
     setNotesEndPage(Math.min(pageCount || 1, pageIndex + 1));
+    setQuestionEndPage(Math.max(pageCount || 1, 1));
   }, [pageIndex, pageCount]);
 
   useEffect(() => {
@@ -1585,6 +1823,18 @@ function AiDialog({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (mode === "ask") {
+      const trimmedQuestion = question.trim();
+      if (!trimmedQuestion) return;
+      onAskBookQuestion(
+        selectedChatThread?.id ?? null,
+        clampPageNumber(questionStartPage, pageCount),
+        clampPageNumber(questionEndPage, pageCount),
+        trimmedQuestion
+      );
+      setQuestion("");
+      return;
+    }
     if (activeTab === "notes") {
       onGenerateFromNotes(
         clampPageNumber(notesStartPage, pageCount),
@@ -1610,17 +1860,21 @@ function AiDialog({
         onMouseDown={(event) => event.stopPropagation()}
         data-open={open}
         className={`ai-modal-panel flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl transition duration-200 ease-out ${
-          mode === "generated" ? "max-w-[75vw]" : "max-w-[760px]"
-        } ${open ? "translate-y-0 scale-100 opacity-100" : "translate-y-3 scale-[0.98] opacity-0"}`}
+          mode === "generated" || mode === "ask" ? "max-w-[75vw]" : "max-w-[760px]"
+        } ${mode === "ask" ? "h-[calc(100vh-7rem)]" : ""} ${open ? "translate-y-0 scale-100 opacity-100" : "translate-y-3 scale-[0.98] opacity-0"}`}
       >
         <div className="flex items-start justify-between gap-4 border-b border-line bg-paper px-5 py-4">
           <div>
             <h2 className="flex items-center gap-2 text-base font-semibold">
               <Sparkles size={18} />
-              {mode === "create" ? "AI Create" : "Generated"}
+              {mode === "create" ? "AI Create" : mode === "ask" ? "Ask book" : "Generated"}
             </h2>
             <p className="mt-1 text-sm leading-6 text-muted">
-              {mode === "create" ? "Generate Persian summaries or texts from notes." : "Review saved AI outputs for this book."}
+              {mode === "create"
+                ? "Generate Persian summaries or texts from notes."
+                : mode === "ask"
+                  ? "Chat with this book. Answers must come only from the selected book pages."
+                  : "Review saved AI outputs for this book."}
             </p>
           </div>
           <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg hover:bg-cream">
@@ -1649,7 +1903,25 @@ function AiDialog({
           </div>
         ) : null}
 
-        {mode === "generated" ? (
+        {mode === "ask" ? (
+          <BookChatView
+            threads={chatThreads}
+            selectedThread={selectedChatThread}
+            startPage={questionStartPage}
+            endPage={questionEndPage}
+            pageCount={pageCount}
+            question={question}
+            isAsking={isAskingBook}
+            error={aiDialogError}
+            onStartPageChange={setQuestionStartPage}
+            onEndPageChange={setQuestionEndPage}
+            onQuestionChange={setQuestion}
+            onSelectThread={onSelectChatThread}
+            onNewThread={onNewChatThread}
+            onDeleteThread={onDeleteChatThread}
+            onCopyMessage={onCopyMessage}
+          />
+        ) : mode === "generated" ? (
           <GeneratedOutputsView
             summaries={summaries}
             selectedSummary={selectedSummary}
@@ -1798,6 +2070,219 @@ function AiDialog({
   );
 }
 
+function BookChatView({
+  threads,
+  selectedThread,
+  startPage,
+  endPage,
+  pageCount,
+  question,
+  isAsking,
+  error,
+  onStartPageChange,
+  onEndPageChange,
+  onQuestionChange,
+  onSelectThread,
+  onNewThread,
+  onDeleteThread,
+  onCopyMessage
+}: {
+  threads: ReaderChatThread[];
+  selectedThread: ReaderChatThread | null;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+  question: string;
+  isAsking: boolean;
+  error: string | null;
+  onStartPageChange: (page: number) => void;
+  onEndPageChange: (page: number) => void;
+  onQuestionChange: (question: string) => void;
+  onSelectThread: (id: string | null) => void;
+  onNewThread: () => void;
+  onDeleteThread: (id: string) => void;
+  onCopyMessage: (text: string) => void;
+}) {
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [selectedThread?.id, selectedThread?.messages.length, isAsking, error]);
+
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-0">
+      <aside className="paper-scroll min-h-0 overflow-auto border-r border-line bg-paper p-3">
+        <button
+          type="button"
+          onClick={onNewThread}
+          className={`mb-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${
+            selectedThread ? "border border-line bg-white hover:bg-cream" : "bg-ink text-white"
+          }`}
+        >
+          <Plus size={16} />
+          New thread
+        </button>
+        {threads.length ? (
+          threads.map((thread) => {
+            const isSelected = selectedThread?.id === thread.id;
+            const firstQuestion = thread.messages.find((message) => message.role === "user")?.content || thread.title;
+            return (
+              <div
+                key={thread.id}
+                className={`group mb-2 flex items-start gap-2 rounded-xl border px-3 py-3 transition ${
+                  isSelected ? "border-ink bg-ink text-white shadow-sm" : "border-transparent bg-white/70 hover:bg-white"
+                }`}
+              >
+              <button
+                type="button"
+                onClick={() => onSelectThread(thread.id)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <span className={`line-clamp-2 block text-left text-sm font-semibold leading-5 ${isSelected ? "text-white" : "text-ink"}`}>
+                  {firstQuestion}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteThread(thread.id);
+                }}
+                className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg opacity-0 transition group-hover:opacity-100 ${
+                  isSelected ? "text-white/70 hover:bg-white/10" : "text-red-700 hover:bg-red-50"
+                }`}
+                title="Delete thread"
+              >
+                <Trash2 size={14} />
+              </button>
+              </div>
+            );
+          })
+        ) : (
+          <div className="flex min-h-32 items-center justify-center px-4 text-center text-sm leading-6 text-muted">
+            No book chats yet.
+          </div>
+        )}
+      </aside>
+
+      <section className="flex min-h-0 flex-col bg-white">
+        <div className="border-b border-line bg-paper px-5 py-3">
+          <div className="grid grid-cols-[1fr_1fr] gap-3">
+            <label className="block">
+              <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">Book scope start</span>
+              <input
+                value={startPage}
+                onChange={(event) => onStartPageChange(Number(event.target.value))}
+                type="number"
+                min={1}
+                max={Math.max(pageCount, 1)}
+                className="h-10 w-full rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-amber-400"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">Book scope end</span>
+              <input
+                value={endPage}
+                onChange={(event) => onEndPageChange(Number(event.target.value))}
+                type="number"
+                min={1}
+                max={Math.max(pageCount, 1)}
+                className="h-10 w-full rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-amber-400"
+              />
+            </label>
+          </div>
+          <p className="mt-2 text-xs font-medium leading-5 text-muted">
+            The assistant receives only these book pages. If the answer is not there, it must say it was not found in the book.
+          </p>
+        </div>
+
+        <div className="paper-scroll min-h-0 flex-1 overflow-auto px-5 py-5">
+          {selectedThread?.messages.length || error ? (
+            <div className="space-y-4">
+              {selectedThread?.messages.map((message) => (
+                <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[78%] rounded-2xl px-4 py-3 text-right font-vazir text-sm leading-7 ${
+                      message.role === "user" ? "bg-ink text-white" : "border border-line bg-paper text-ink"
+                    }`}
+                    dir="rtl"
+                  >
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    <div className={`mt-2 flex flex-wrap items-center justify-end gap-2 text-[11px] font-semibold ${
+                      message.role === "user" ? "text-white/65" : "text-muted"
+                    }`}>
+                      {message.role === "assistant" ? (
+                        <>
+                        {message.start_page && message.end_page ? <span>Page {message.start_page} / {message.end_page}</span> : null}
+                        <UsageCostBadges summary={message} compact />
+                        </>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => onCopyMessage(message.content)}
+                        className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 ${
+                          message.role === "user" ? "hover:bg-white/10" : "hover:bg-cream"
+                        }`}
+                        title="Copy message"
+                      >
+                        <Copy size={12} />
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {isAsking ? (
+                <div className="inline-flex items-center gap-2 rounded-2xl border border-line bg-paper px-4 py-3 text-sm font-semibold text-muted">
+                  <Loader2 className="animate-spin" size={16} />
+                  Reading book context...
+                </div>
+              ) : null}
+              {error && !isAsking ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left text-sm font-medium leading-6 text-red-700">
+                  {error}
+                </div>
+              ) : null}
+              <div ref={chatBottomRef} />
+            </div>
+          ) : (
+            <div className="flex h-full min-h-52 items-center justify-center text-center text-sm leading-6 text-muted">
+              Start a thread and ask a question grounded only in this book.
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-line bg-paper p-4">
+          <div className="flex items-end gap-3 rounded-2xl border border-line bg-white p-2">
+            <textarea
+              value={question}
+              onChange={(event) => onQuestionChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder="Ask a question about the selected book pages..."
+              rows={2}
+              dir="auto"
+              className="max-h-32 min-h-11 flex-1 resize-none rounded-xl bg-transparent px-3 py-2 text-sm leading-6 outline-none"
+            />
+            <button
+              type="submit"
+              disabled={isAsking || !question.trim()}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-ink px-4 text-sm font-semibold text-white hover:bg-black disabled:opacity-45"
+            >
+              {isAsking ? <Loader2 className="animate-spin" size={16} /> : <MessageSquare size={16} />}
+              Ask
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SummaryArticle({ summary }: { summary: ReaderSummary }) {
   return (
     <article>
@@ -1853,7 +2338,15 @@ function ConfirmDialog({
   );
 }
 
-function UsageCostBadges({ summary, compact = false, selected = false }: { summary: ReaderSummary; compact?: boolean; selected?: boolean }) {
+function UsageCostBadges({
+  summary,
+  compact = false,
+  selected = false
+}: {
+  summary: Pick<ReaderSummary, "provider_cost" | "cost_currency">;
+  compact?: boolean;
+  selected?: boolean;
+}) {
   const cost = costDisplayText(summary);
   if (!cost) return (
     <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
@@ -2029,11 +2522,16 @@ function summaryTitle(summary: ReaderSummary) {
   return firstLine.replace(/^[-•\s]+/, "").slice(0, 64);
 }
 
+function compactChatTitle(text: string) {
+  const title = text.replace(/\s+/g, " ").trim();
+  return title.length > 72 ? `${title.slice(0, 69)}...` : title || "Book question";
+}
+
 function outputType(summary: ReaderSummary) {
   return summary.output_type === "notes" ? "notes" : "summary";
 }
 
-function costDisplayText(summary: ReaderSummary) {
+function costDisplayText(summary: Pick<ReaderSummary, "provider_cost" | "cost_currency">) {
   const cost = Number(summary.provider_cost);
   if (!Number.isFinite(cost)) return null;
   const currency = summary.cost_currency?.trim();
