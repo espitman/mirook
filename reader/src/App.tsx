@@ -53,14 +53,19 @@ const AI_MODELS = [
   { label: "openai/gpt-5-nano", value: "openai/gpt-5-nano" }
 ];
 
+const ORIGINAL_FONT_SIZE_STORAGE_KEY = "mirook-reader-original-font-size-v3";
+const ORIGINAL_READER_FONT_SIZE = 18;
+const TRANSLATION_READER_FONT_SIZE = 22;
+const ORIGINAL_READER_LINE_HEIGHT = 1.5;
+
 export function App() {
   const [book, setBook] = useState<MirookBookPayload | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
   const [originalFontSize, setOriginalFontSize] = useState(() =>
-    Number(localStorage.getItem("mirook-reader-original-font-size") ?? localStorage.getItem("mirook-reader-font-size") ?? 22)
+    Number(localStorage.getItem(ORIGINAL_FONT_SIZE_STORAGE_KEY) ?? ORIGINAL_READER_FONT_SIZE)
   );
   const [translationFontSize, setTranslationFontSize] = useState(() =>
-    Number(localStorage.getItem("mirook-reader-translation-font-size") ?? localStorage.getItem("mirook-reader-font-size") ?? 22)
+    Number(localStorage.getItem("mirook-reader-translation-font-size") ?? localStorage.getItem("mirook-reader-font-size") ?? TRANSLATION_READER_FONT_SIZE)
   );
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +102,7 @@ export function App() {
   const canGoNext = pageCount ? pageIndex < pageCount - 1 : false;
 
   useEffect(() => {
-    localStorage.setItem("mirook-reader-original-font-size", String(originalFontSize));
+    localStorage.setItem(ORIGINAL_FONT_SIZE_STORAGE_KEY, String(originalFontSize));
   }, [originalFontSize]);
 
   useEffect(() => {
@@ -297,7 +302,6 @@ export function App() {
     setPageIndex(restoredPageIndex);
     setViewMode(isViewMode(savedViewMode) ? savedViewMode : "split");
     if (Number.isFinite(savedFontSize) && savedFontSize >= 14 && savedFontSize <= 36) {
-      setOriginalFontSize(savedFontSize);
       setTranslationFontSize(savedFontSize);
     }
   }
@@ -707,14 +711,15 @@ function ReaderLayout({
   const showOriginal = viewMode === "split" || viewMode === "original";
   const showTranslation = viewMode === "split" || viewMode === "translation";
   const pageAnnotations = annotations.filter((annotation) => annotation.page_index === pageIndex);
+  const isSingleColumn = viewMode !== "split";
 
   return (
-    <div className="mx-auto flex h-full min-h-0 max-w-[1720px] gap-5">
+    <div className={`mx-auto flex h-full min-h-0 gap-5 ${isSingleColumn ? "max-w-none justify-center" : "max-w-[1720px]"}`}>
       <div
         className={
           viewMode === "split"
             ? "grid h-full min-h-0 min-w-0 flex-1 grid-cols-2 gap-5 transition-[width,flex-basis] duration-200 ease-out"
-            : "mx-auto grid h-full min-h-0 min-w-0 flex-1 grid-cols-1 transition-[width,flex-basis] duration-200 ease-out"
+            : "grid h-full min-h-0 w-full max-w-[850px] shrink-0 grid-cols-1 transition-[width,flex-basis] duration-200 ease-out"
         }
       >
         {showOriginal ? (
@@ -726,6 +731,7 @@ function ReaderLayout({
             fontSize={originalFontSize}
             onFontSizeChange={onOriginalFontSizeChange}
             onSelectionContextMenu={onSelectionContextMenu}
+            pageShape={isSingleColumn}
           >
             {book.manifest.sourceKind === "pdf" && book.sourcePdf ? (
               <iframe src={book.sourcePdf} className="h-full min-h-[420px] w-full rounded-lg border border-line bg-white" title="Original PDF" />
@@ -748,6 +754,7 @@ function ReaderLayout({
             fontSize={translationFontSize}
             onFontSizeChange={onTranslationFontSizeChange}
             onSelectionContextMenu={onSelectionContextMenu}
+            pageShape={isSingleColumn}
           >
             {page?.isBlank ? (
               <div className="h-full min-h-[420px]" />
@@ -868,6 +875,7 @@ function Paper({
   fontSize,
   onFontSizeChange,
   onSelectionContextMenu,
+  pageShape = false,
   children
 }: {
   title: string;
@@ -876,10 +884,15 @@ function Paper({
   fontSize: number;
   onFontSizeChange: (value: number | ((current: number) => number)) => void;
   onSelectionContextMenu: (side: AnnotationSide, pageIndex: number, event: ReactMouseEvent<HTMLElement>) => void;
+  pageShape?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft">
+    <section
+      className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-soft ${
+        pageShape ? "mx-auto h-full w-full" : "h-full"
+      }`}
+    >
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-paper px-6 py-4">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold">
@@ -891,7 +904,9 @@ function Paper({
       <div
         data-reader-scroll-pane
         onContextMenu={(event) => onSelectionContextMenu(side, pageIndex, event)}
-        className="paper-scroll min-h-0 flex-1 overflow-auto bg-white px-12 py-10"
+        className={`paper-scroll min-h-0 flex-1 overflow-auto bg-white ${
+          side === "original" ? "px-14 py-14" : "px-12 py-10"
+        }`}
       >
         {children}
       </div>
@@ -958,10 +973,29 @@ function DisplayFlow({
           );
         }
         const blockId = textBlockId("translation", pageIndex, index);
+        return <TranslationTextBlock key={index} text={block.text} blockId={blockId} annotations={annotationsForBlock(annotations, blockId)} />;
+      })}
+    </div>
+  );
+}
+
+function TranslationTextBlock({ text, blockId, annotations }: { text: string; blockId: string; annotations: ReaderAnnotation[] }) {
+  const lines = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n");
+  let cursor = 0;
+
+  return (
+    <div data-annotation-block-id={blockId} className="mb-5 text-right">
+      {lines.map((line, index) => {
+        const lineStart = cursor;
+        cursor += line.length + (index < lines.length - 1 ? 1 : 0);
+        if (!line.trim()) return <br key={index} />;
         return (
-          <p key={index} data-annotation-block-id={blockId} className="mb-5 whitespace-pre-wrap text-right">
-            <MarkedText text={block.text} annotations={annotationsForBlock(annotations, blockId)} />
-          </p>
+          <div key={`${index}-${line}`} className={`whitespace-pre-wrap ${isTranslationHeadingLine(line) ? "font-bold" : ""}`}>
+            <MarkedText text={line} annotations={annotationsForTextRange(annotations, lineStart, lineStart + line.length)} />
+          </div>
         );
       })}
     </div>
@@ -983,8 +1017,17 @@ function BlockFlow({
   pageIndex: number;
   annotations: ReaderAnnotation[];
 }) {
+  if (direction === "ltr") {
+    return <OriginalPdfFlow blocks={blocks} fontSize={fontSize} side={side} pageIndex={pageIndex} annotations={annotations} />;
+  }
+
+  const flowStyle: CSSProperties = {
+    fontSize,
+    lineHeight: 1.75
+  };
+
   return (
-    <div className={direction === "rtl" ? "font-vazir" : "font-serif"} dir={direction} style={{ fontSize, lineHeight: 1.75 }}>
+    <div className="font-vazir" dir={direction} style={flowStyle}>
       {blocks.map((block, index) => (
         <Block
           key={index}
@@ -995,6 +1038,84 @@ function BlockFlow({
           annotations={annotations}
         />
       ))}
+    </div>
+  );
+}
+
+function OriginalPdfFlow({
+  blocks,
+  fontSize,
+  side,
+  pageIndex,
+  annotations
+}: {
+  blocks: (EpubBlock | DisplayBlock)[];
+  fontSize: number;
+  side: AnnotationSide;
+  pageIndex: number;
+  annotations: ReaderAnnotation[];
+}) {
+  return (
+    <div className="original-pdf-page mx-auto w-full max-w-[760px]" dir="ltr" style={{ fontSize }}>
+      {blocks.map((block, index) => {
+        if (block.type === "image") return <BookImage key={index} src={block.src} alt={block.altText ?? ""} compact />;
+        const blockId = textBlockId(side, pageIndex, index);
+        const blockAnnotations = annotationsForBlock(annotations, blockId);
+        if (block.type === "link") {
+          return (
+            <OriginalPdfTextBlock
+              key={index}
+              text={block.title}
+              blockId={blockId}
+              annotations={blockAnnotations}
+              linkHref={block.href}
+            />
+          );
+        }
+        return <OriginalPdfTextBlock key={index} text={block.text} blockId={blockId} annotations={blockAnnotations} />;
+      })}
+    </div>
+  );
+}
+
+function OriginalPdfTextBlock({
+  text,
+  blockId,
+  annotations,
+  linkHref
+}: {
+  text: string;
+  blockId: string;
+  annotations: ReaderAnnotation[];
+  linkHref?: string;
+}) {
+  const lines = originalPdfLines(text);
+  let cursor = 0;
+
+  return (
+    <div data-annotation-block-id={blockId} className="original-pdf-block">
+      {lines.map((line, index) => {
+        const lineStart = cursor;
+        cursor += line.raw.length + (index < lines.length - 1 ? 1 : 0);
+        const lineAnnotations = annotationsForTextRange(annotations, lineStart, lineStart + line.raw.length);
+        const content = <MarkedText text={line.raw} annotations={lineAnnotations} />;
+        return (
+          <div
+            key={`${index}-${line.raw}`}
+            className={`original-pdf-line ${line.indented ? "original-pdf-line-indent" : ""} ${
+              line.heading ? "original-pdf-heading" : ""
+            }`}
+          >
+            {linkHref ? (
+              <a className="text-blue-700 underline" href={linkHref}>
+                {content}
+              </a>
+            ) : (
+              content
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1013,8 +1134,14 @@ function Block({
   annotations: ReaderAnnotation[];
 }) {
   if (block.type === "image") return <BookImage src={block.src} alt={block.altText ?? ""} compact />;
-  const textStyle: CSSProperties = { fontSize, lineHeight: direction === "rtl" ? 2.05 : 1.75 };
-  const className = direction === "rtl" ? "font-vazir mb-5 whitespace-pre-wrap text-right" : "font-serif mb-5 whitespace-pre-wrap";
+  const textStyle: CSSProperties = {
+    fontSize,
+    lineHeight: direction === "rtl" ? 2.05 : ORIGINAL_READER_LINE_HEIGHT
+  };
+  const className =
+    direction === "rtl"
+      ? "font-vazir mb-5 whitespace-pre-wrap text-right"
+      : "mb-[18px] whitespace-pre-wrap";
 
   if (block.type === "link") {
     return (
@@ -1048,12 +1175,29 @@ function TextFlow({
   pageIndex: number;
   annotations: ReaderAnnotation[];
 }) {
+  if (direction === "ltr") {
+    return (
+      <OriginalPdfFlow
+        blocks={text ? [{ type: "text", text }] : []}
+        fontSize={fontSize}
+        side={side}
+        pageIndex={pageIndex}
+        annotations={annotations}
+      />
+    );
+  }
+
+  const textStyle: CSSProperties = {
+    fontSize,
+    lineHeight: 1.8
+  };
+
   return (
-    <div className={direction === "rtl" ? "font-vazir" : "font-serif"} dir={direction} style={{ fontSize, lineHeight: 1.8 }}>
+    <div className="font-vazir" dir={direction} style={textStyle}>
       {text.split(/\n{2,}/).map((paragraph, index) => {
         const blockId = textBlockId(side, pageIndex, index);
         return (
-          <p key={index} data-annotation-block-id={blockId} className="mb-5 whitespace-pre-wrap">
+          <p key={index} data-annotation-block-id={blockId} className="mb-[18px] whitespace-pre-wrap">
             <MarkedText text={paragraph} annotations={annotationsForBlock(annotations, blockId)} />
           </p>
         );
@@ -2149,6 +2293,60 @@ function textBlockId(side: AnnotationSide, pageIndex: number, blockIndex: number
 
 function annotationsForBlock(annotations: ReaderAnnotation[], blockId: string) {
   return annotations.filter((annotation) => annotation.block_id === blockId);
+}
+
+function annotationsForTextRange(annotations: ReaderAnnotation[], start: number, end: number) {
+  return annotations
+    .filter((annotation) => Number(annotation.end_offset) > start && Number(annotation.start_offset) < end)
+    .map((annotation) => ({
+      ...annotation,
+      start_offset: Math.max(0, Number(annotation.start_offset) - start),
+      end_offset: Math.min(end - start, Number(annotation.end_offset) - start)
+    }));
+}
+
+function originalPdfLines(text: string) {
+  const rawLines = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim());
+
+  return rawLines.map((raw, index) => {
+    const trimmed = raw.trim();
+    const previous = index > 0 ? rawLines[index - 1].trim() : "";
+    const previousLooksClosed = /[.!?؟:;؛)"”»\]]$/.test(previous);
+    const heading = isOriginalHeadingLine(trimmed);
+    const previousHeading = previous ? isOriginalHeadingLine(previous) : false;
+    const indented =
+      index > 0 &&
+      !heading &&
+      !previousHeading &&
+      previousLooksClosed &&
+      !/^(?:\(|\[|["“])/.test(trimmed);
+
+    return { raw: trimmed, indented, heading };
+  });
+}
+
+function isOriginalHeadingLine(text: string) {
+  if (/^\d+\.\s+\S/.test(text)) return true;
+  if (/^\d+$/.test(text)) return true;
+  if (text.length > 90 || /[.!?؟;؛]$/.test(text)) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length > 8) return false;
+  return words.some((word) => /^[A-Z0-9]/.test(word));
+}
+
+function isTranslationHeadingLine(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^[\d۰-۹٠-٩]+$/.test(trimmed)) return true;
+  if (/^[\d۰-۹٠-٩]+[.)،]\s+\S/.test(trimmed)) return true;
+  if (trimmed.length > 90 || /[.!?؟:؛;،,]$/.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return words.length <= 8;
 }
 
 function hasActiveTextSelection() {

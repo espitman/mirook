@@ -23,108 +23,37 @@ export function sourcePlainText(blocks: EpubBlock[] | undefined, fallback = "") 
 }
 
 export function translationParagraphs(page?: TranslatedTextPage) {
-  const pageSourceText = page?.sourceText ?? "";
-  const blockParagraphs =
-    page?.paragraphBlocks
-      ?.map((block) => {
-        const sourceText = sourceSegmentWithOriginalLineBreaks(pageSourceText, block.sourceText) ?? block.sourceText;
-        return translatedTextWithSourceLineBreaks(sourceText, block.translatedText);
-      })
-      .filter((text): text is string => Boolean(text)) ?? [];
+  const paragraphBlocks = page?.paragraphBlocks ?? [];
+  const hasReliableParagraphBlocks =
+    paragraphBlocks.length > 0 &&
+    paragraphBlocks.every((block) => block.confidence === undefined || block.confidence >= 0.95);
+
+  const blockParagraphs = hasReliableParagraphBlocks
+    ? paragraphBlocks
+      ?.map((block) => normalizeParagraphText(block.translatedText ?? ""))
+      .filter((text): text is string => Boolean(text))
+    : [];
 
   if (blockParagraphs.length) return blockParagraphs;
 
-  const sourceParagraphs = displayParagraphs(page?.sourceText ?? "");
-  return (page?.translatedText ?? "")
-    .split(/\n{2,}/)
-    .map((text) => text.trim())
-    .map((text, index) => translatedTextWithSourceLineBreaks(sourceParagraphs[index], text))
-    .filter(Boolean);
+  return splitParagraphs(page?.translatedText ?? "", { preserveLineBreaks: true });
 }
 
-function translatedTextWithSourceLineBreaks(sourceText?: string, translatedText?: string) {
-  const translated = translatedText?.trim();
-  if (!translated) return "";
+function pageSourceParagraphs(page?: TranslatedTextPage) {
+  const paragraphBlocks = page?.paragraphBlocks ?? [];
+  const hasReliableParagraphBlocks =
+    paragraphBlocks.length > 0 &&
+    paragraphBlocks.every((block) => block.confidence === undefined || block.confidence >= 0.95);
 
-  const sourceLines = sourceText
-    ?.split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean) ?? [];
+  const blockParagraphs = hasReliableParagraphBlocks
+    ? paragraphBlocks
+      ?.map((block) => normalizeParagraphText(block.sourceText ?? ""))
+      .filter(Boolean)
+    : [];
 
-  if (!shouldMirrorSourceLines(sourceLines)) return translated;
+  if (blockParagraphs.length) return blockParagraphs;
 
-  const translatedLines = translated.split(/\n+/).filter((line) => line.trim());
-  if (translatedLines.length === sourceLines.length) return translated;
-
-  const words = translated.split(/\s+/).filter(Boolean);
-  if (words.length <= sourceLines.length) return words.join("\n");
-
-  const sourceWeights = sourceLines.map((line) => Math.max(1, line.split(/\s+/).filter(Boolean).length));
-  const totalWeight = sourceWeights.reduce((sum, weight) => sum + weight, 0);
-  const lines: string[] = [];
-  let cursor = 0;
-
-  sourceWeights.forEach((weight, index) => {
-    const remainingLines = sourceWeights.length - index;
-    const remainingWords = words.length - cursor;
-    const count = index === sourceWeights.length - 1
-      ? remainingWords
-      : Math.max(1, Math.min(remainingWords - remainingLines + 1, Math.round((words.length * weight) / totalWeight)));
-    lines.push(words.slice(cursor, cursor + count).join(" "));
-    cursor += count;
-  });
-
-  return lines.filter(Boolean).join("\n");
-}
-
-function shouldMirrorSourceLines(sourceLines: string[]) {
-  if (sourceLines.length < 2 || sourceLines.length > 12) return false;
-  const totalLength = sourceLines.join(" ").length;
-  const hasStructuralShortLine = sourceLines.some((line) => line.length <= 24);
-  const hasListMarkerLine = sourceLines.some((line) => /^\d+[\).]?\s/.test(line));
-  return totalLength <= 900 && (hasStructuralShortLine || hasListMarkerLine || sourceLines.length <= 3);
-}
-
-function sourceSegmentWithOriginalLineBreaks(pageSourceText: string, blockSourceText?: string) {
-  if (!pageSourceText || !blockSourceText) return blockSourceText;
-
-  const pageText = normalizeForLineMatch(pageSourceText);
-  const blockText = normalizeForLineMatch(blockSourceText).text;
-  if (!blockText) return blockSourceText;
-
-  const normalizedIndex = pageText.text.indexOf(blockText);
-  if (normalizedIndex < 0) return blockSourceText;
-
-  const rawStart = pageText.map[normalizedIndex];
-  const rawEnd = pageText.map[normalizedIndex + blockText.length - 1];
-  if (rawStart === undefined || rawEnd === undefined) return blockSourceText;
-
-  return pageSourceText.slice(rawStart, rawEnd + 1);
-}
-
-function normalizeForLineMatch(text: string) {
-  let normalized = "";
-  const map: number[] = [];
-  let pendingSpaceIndex: number | null = null;
-
-  for (let rawIndex = 0; rawIndex < text.length; rawIndex += 1) {
-    const char = text[rawIndex];
-    if (/\s/.test(char)) {
-      if (normalized && !normalized.endsWith(" ")) pendingSpaceIndex = rawIndex;
-      continue;
-    }
-
-    if (pendingSpaceIndex !== null) {
-      normalized += " ";
-      map.push(pendingSpaceIndex);
-      pendingSpaceIndex = null;
-    }
-
-    normalized += char.toLowerCase();
-    map.push(rawIndex);
-  }
-
-  return { text: normalized, map };
+  return splitParagraphs(page?.sourceText ?? "", { preserveLineBreaks: true });
 }
 
 export function pageAlignedSourceBlocks(epubPages: EpubPage[] | undefined, page?: TranslatedTextPage) {
@@ -147,7 +76,7 @@ export function pageAlignedSourceBlocks(epubPages: EpubPage[] | undefined, page?
 }
 
 export function sourceDisplayBlocks(sourceBlocks: EpubBlock[] | undefined, page?: TranslatedTextPage): DisplayBlock[] {
-  const paragraphs = displayParagraphs(page?.sourceText ?? "");
+  const paragraphs = pageSourceParagraphs(page);
   if (!paragraphs.length) return [];
   if (!sourceBlocks?.length) return paragraphs.map((text) => ({ type: "text", text }));
 
@@ -188,7 +117,7 @@ export function translatedDisplayBlocks(sourceBlocks: EpubBlock[] | undefined, p
 }
 
 export function pairedDisplayRows(sourceBlocks: EpubBlock[] | undefined, page?: TranslatedTextPage): PairedDisplayRow[] {
-  const sourceParagraphs = displayParagraphs(page?.sourceText ?? "");
+  const sourceParagraphs = pageSourceParagraphs(page);
   const translatedParagraphs = translationParagraphs(page);
   const sourceImages = sourceBlocks?.length ? imagePlacementsByParagraph(sourceBlocks, sourceParagraphs) : [];
   const translationImages = sourceBlocks?.length ? imagePlacementsByParagraph(sourceBlocks, translatedParagraphs, { scaleFallback: true }) : [];
@@ -315,6 +244,40 @@ function displayParagraphs(text: string) {
     .split(/\n{2,}/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function splitParagraphs(text: string, options: { preserveLineBreaks?: boolean } = {}) {
+  const paragraphs: string[] = [];
+  let currentLines: string[] = [];
+
+  text.split(/\r?\n/).forEach((line) => {
+    const trimmedLine = line.replace(/\s+$/g, "").trim();
+    if (!trimmedLine) {
+      if (currentLines.length) {
+        paragraphs.push(currentLines.join(options.preserveLineBreaks ? "\n" : " "));
+        currentLines = [];
+      }
+      return;
+    }
+
+    currentLines.push(trimmedLine);
+  });
+
+  if (currentLines.length) paragraphs.push(currentLines.join(options.preserveLineBreaks ? "\n" : " "));
+
+  return options.preserveLineBreaks
+    ? paragraphs.map((paragraph) => paragraph.trim()).filter(Boolean)
+    : paragraphs.map(normalizeParagraphText).filter(Boolean);
+}
+
+function normalizeParagraphText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeForMatch(text: string) {

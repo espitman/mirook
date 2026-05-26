@@ -60,6 +60,41 @@ input {
   border-radius: 999px;
 }
 
+.original-pdf-page {
+  color: #050505;
+  font-family: Georgia, "Times New Roman", Times, serif;
+  font-kerning: normal;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  word-spacing: 0.035em;
+}
+
+.original-pdf-block + .original-pdf-block {
+  margin-top: 0.05em;
+}
+
+.original-pdf-line {
+  min-height: 1.5em;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.original-pdf-line-indent {
+  margin-top: 0.9em;
+  padding-left: 1.85em;
+}
+
+.original-pdf-heading {
+  font-weight: 700;
+  margin-bottom: 0.45em;
+  margin-top: 1em;
+  min-height: 1.55em;
+  text-align: left;
+  word-spacing: normal;
+}
+
 .page-scrubber {
   height: 12px;
   appearance: none;
